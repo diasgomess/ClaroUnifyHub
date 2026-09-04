@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClaroUnify Hub — MVP</title>
+<link rel="stylesheet" href="/static/style.css?v=8">
+<script src="/static/chart.umd.js?v=1"></script>
+</head>
+<body>
+<div id="toast-container" class="toast-container"></div>
+<div class="app-shell">
+
+  <div class="top-bar">
+    <div class="brand">
+      <span class="mark">CU</span>
+      <div>
+        <h1>ClaroUnify Hub</h1>
+        <div class="sub">Orquestrador conversacional omnicanal — MVP funcional</div>
+      </div>
+    </div>
+    <div class="customer-switcher">
+      Simulando o cliente:
+      <select id="customerSelect"></select>
+      <span class="reset-link" onclick="resetAll()">reiniciar demo</span>
+    </div>
+  </div>
+
+  <div class="mode-switch">
+    <button class="mode-btn active" data-mode="cliente" onclick="switchMode('cliente')">
+      <span class="mode-icon">👤</span> Sou Cliente
+    </button>
+    <button class="mode-btn" data-mode="interno" onclick="switchMode('interno')">
+      <span class="mode-icon">🏢</span> Painel Claro (interno)
+    </button>
+  </div>
+
+  <!-- ========================= ÁREA DO CLIENTE ========================= -->
+  <div class="area" id="area-cliente">
+
+    <!-- Tela de escolha de canal -->
+    <div class="channel-picker" id="channel-picker">
+      <h2>Como você prefere falar com a Claro hoje?</h2>
+      <p class="picker-sub">Escolha um canal para começar — você pode migrar para o outro a qualquer momento sem repetir nada.</p>
+      <div class="channel-cards">
+        <div class="channel-card" onclick="selectChannel('site')">
+          <div class="channel-card-icon site-icon">🌐</div>
+          <div class="channel-card-title">Site Web</div>
+          <div class="channel-card-desc">Chat pelo widget do site da Claro</div>
+        </div>
+        <div class="channel-card" onclick="selectChannel('whatsapp')">
+          <div class="channel-card-icon wa-icon">💬</div>
+          <div class="channel-card-title">WhatsApp</div>
+          <div class="channel-card-desc">Continue de onde parar, no seu WhatsApp</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat ativo (Site OU WhatsApp, nunca os dois ao mesmo tempo) -->
+    <div class="active-chat" id="active-chat" style="display:none;">
+      <div class="chat-topbar">
+        <span class="change-channel-link" onclick="showChannelPicker()">← trocar canal</span>
+      </div>
+
+      <div class="chat-frame" id="chat-frame">
+        <div class="chat-header" id="chat-header">
+          <div class="avatar">CU</div>
+          <div>
+            <div class="name" id="chat-name">Assistente ClaroUnify</div>
+            <div class="status" id="chat-status">online</div>
+          </div>
+        </div>
+        <div class="chat-body" id="chat-body"></div>
+
+        <div class="migrate-banner" id="migrate-banner">
+          <span id="migrate-text">Prefere continuar essa conversa no WhatsApp?</span>
+          <button class="migrate-btn" onclick="migrateChannel()" id="migrate-btn">Continuar lá →</button>
+        </div>
+
+        <div class="quick-replies" id="quick-replies"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Digite sua mensagem..." onkeydown="if(event.key==='Enter') sendMessage()">
+          <button class="send-btn" onclick="sendMessage()">Enviar</button>
+        </div>
+      </div>
+
+      <button class="proactive-btn" id="proactive-btn" onclick="dispararCampanha()" style="display:none;">
+        Simular campanha proativa de fatura (Cenário 4)
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ========================= ÁREA INTERNA CLARO ========================= -->
+  <div class="area" id="area-interno" style="display:none;">
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dash" onclick="switchInternalTab('dash')">Dashboard Admin</button>
+      <button class="tab-btn" data-tab="handoff" onclick="switchInternalTab('handoff')">Painel de Handoff</button>
+      <button class="tab-btn" data-tab="contato" onclick="switchInternalTab('contato')">Iniciar Contato</button>
+    </div>
+
+    <div class="panel active" id="panel-dash">
+      <div class="kpi-grid" id="kpi-grid"></div>
+      <div class="section-title">Alertas automáticos</div>
+      <div id="alertas-box"></div>
+      <div class="section-title">Mensagens por canal</div>
+      <div class="kpi-grid" id="kpi-canais"></div>
+      <div class="chart-box">
+        <canvas id="chart-canais" height="90"></canvas>
+      </div>
+      <div class="section-title">Resolução por canal (RF006)</div>
+      <div class="kpi-grid" id="kpi-resolucao-canal"></div>
+      <div class="section-title">Tempo de resposta (RNF001)</div>
+      <div id="rnf001-box"></div>
+      <div class="section-title">
+        Log de eventos <span class="badge-live"><span class="dot"></span>ao vivo</span>
+      </div>
+      <div class="event-log" id="event-log"></div>
+    </div>
+
+    <div class="panel" id="panel-handoff">
+      <div id="handoff-content"></div>
+    </div>
+
+    <div class="panel" id="panel-contato">
+      <p class="picker-sub">Numa base real da Claro (milhões de clientes), ninguém rola uma lista inteira — busque por nome/telefone ou filtre por segmento.</p>
+
+      <div class="contato-busca-row">
+        <input type="text" id="contato-busca" placeholder="Buscar por nome ou telefone..." onkeydown="if(event.key==='Enter') aplicarFiltroContato()">
+        <button class="quick-btn" onclick="aplicarFiltroContato()">Buscar</button>
+      </div>
+
+      <div class="segmento-chips">
+        <button class="segmento-chip active" id="chip-todos" onclick="aplicarSegmento('','')">Todos</button>
+        <button class="segmento-chip" id="chip-atrasada" onclick="aplicarSegmento('atrasada','')">🔴 Fatura atrasada</button>
+        <button class="segmento-chip" id="chip-em_aberto" onclick="aplicarSegmento('em_aberto','')">🟡 Fatura em aberto</button>
+        <button class="segmento-chip" id="chip-instabilidade" onclick="aplicarSegmento('','instabilidade')">🔴 Instabilidade de rede</button>
+      </div>
+
+      <div class="lote-box">
+        <div class="lote-title">Contato em massa com o segmento filtrado (<span id="contato-total-filtrado">carregando...</span>)</div>
+        <div class="contato-form">
+          <select id="lote-canal">
+            <option value="whatsapp">WhatsApp</option>
+            <option value="site">Site Web</option>
+          </select>
+          <select id="lote-motivo" onchange="toggleMensagemPersonalizadaLote()">
+            <option value="fatura_vencendo">Fatura vencendo</option>
+            <option value="retencao">Retenção</option>
+            <option value="upgrade_oferta">Oferta de upgrade</option>
+            <option value="outro">Outro assunto</option>
+          </select>
+          <input type="text" id="lote-msg" placeholder="Mensagem personalizada..." style="display:none;">
+          <button class="send-btn lote-send-btn" onclick="iniciarContatoLote()">Enviar para todo o segmento</button>
+        </div>
+        <div class="contato-resultado" id="lote-resultado"></div>
+      </div>
+
+      <div id="contato-lista"></div>
+      <div class="paginacao" id="contato-paginacao"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="/static/app.js?v=8"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-dotenv
+
+# --- Testes automatizados ---
+pytest
+pytest-cov
+
+# --- Suíte prova_dos_9.py (testes E2E contra o servidor real) ---
+requests

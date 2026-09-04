@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+clarounify.db
+.env
+.git/
+.pytest_cache/
+htmlcov/
+.coverage
+tests/
+README.md
+CHANGELOG.md
+.vscode/

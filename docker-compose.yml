@@ -1,0 +1,59 @@
+services:
+  app:
+    build: .
+    container_name: clarounify-app
+    ports:
+      - "8000:8000"
+    environment:
+      # Aponta para o serviço "ollama" abaixo pelo nome do serviço (rede interna
+      # do compose) — não "localhost", que dentro do container seria ele mesmo.
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:4b}
+      - USE_LLM=${USE_LLM:-true}
+      - LLM_TIMEOUT_S=${LLM_TIMEOUT_S:-20}
+      - DATABASE_PATH=/data/clarounify.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEFAULT_CUSTOMER=${DEFAULT_CUSTOMER:-11999990001}
+      - RATE_LIMIT_MAX_MSGS=${RATE_LIMIT_MAX_MSGS:-20}
+      - RATE_LIMIT_WINDOW_S=${RATE_LIMIT_WINDOW_S:-60}
+      - ALERT_VOLUME_HANDOFF_PCT_MAX=${ALERT_VOLUME_HANDOFF_PCT_MAX:-40.0}
+      - ALERT_TAXA_RESOLUCAO_PCT_MIN=${ALERT_TAXA_RESOLUCAO_PCT_MIN:-50.0}
+      - ALERT_RATE_LIMIT_BLOQUEIOS_MAX=${ALERT_RATE_LIMIT_BLOQUEIOS_MAX:-3}
+      - CUSTO_BOT_ESTIMADO=${CUSTO_BOT_ESTIMADO:-0.15}
+      - CUSTO_HANDOFF_ESTIMADO=${CUSTO_HANDOFF_ESTIMADO:-8.50}
+      - HANDOFF_WEBHOOK_URL=${HANDOFF_WEBHOOK_URL:-}
+    volumes:
+      - clarounify_data:/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/llm-status')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Serviço do LLM local. Se você já roda o Ollama diretamente na sua máquina
+  # (fora do Docker), pode remover este serviço e apontar OLLAMA_URL para
+  # http://host.docker.internal:11434 no `app` acima.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clarounify-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    # Descomente para usar GPU NVIDIA (requer nvidia-container-toolkit instalado):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  clarounify_data:
+  ollama_models:
