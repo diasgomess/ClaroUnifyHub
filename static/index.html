@@ -13,7 +13,6 @@
 
   <div class="top-bar">
     <div class="brand">
-      <span class="mark">CU</span>
       <div>
         <h1>ClaroUnify Hub</h1>
         <div class="sub">Orquestrador conversacional omnicanal — MVP funcional</div>
@@ -28,10 +27,10 @@
 
   <div class="mode-switch">
     <button class="mode-btn active" data-mode="cliente" onclick="switchMode('cliente')">
-      <span class="mode-icon">👤</span> Sou Cliente
+      <span class="mode-icon"></span> Sou Cliente
     </button>
     <button class="mode-btn" data-mode="interno" onclick="switchMode('interno')">
-      <span class="mode-icon">🏢</span> Painel Claro (interno)
+      <span class="mode-icon"></span> Painel Claro (interno)
     </button>
   </div>
 
@@ -133,9 +132,9 @@
 
       <div class="segmento-chips">
         <button class="segmento-chip active" id="chip-todos" onclick="aplicarSegmento('','')">Todos</button>
-        <button class="segmento-chip" id="chip-atrasada" onclick="aplicarSegmento('atrasada','')">🔴 Fatura atrasada</button>
-        <button class="segmento-chip" id="chip-em_aberto" onclick="aplicarSegmento('em_aberto','')">🟡 Fatura em aberto</button>
-        <button class="segmento-chip" id="chip-instabilidade" onclick="aplicarSegmento('','instabilidade')">🔴 Instabilidade de rede</button>
+        <button class="segmento-chip" id="chip-atrasada" onclick="aplicarSegmento('atrasada','')">Fatura atrasada</button>
+        <button class="segmento-chip" id="chip-em_aberto" onclick="aplicarSegmento('em_aberto','')">Fatura em aberto</button>
+        <button class="segmento-chip" id="chip-instabilidade" onclick="aplicarSegmento('','instabilidade')">Instabilidade de rede</button>
       </div>
 
       <div class="lote-box">

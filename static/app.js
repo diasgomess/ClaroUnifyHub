@@ -387,7 +387,7 @@ async function loadDashboard() {
 
   const alertBox = document.getElementById('alertas-box');
   if (alertasData.alertas.length === 0) {
-    alertBox.innerHTML = '<div class="alert-ok">✅ Nenhum alerta ativo no momento.</div>';
+    alertBox.innerHTML = '<div class="alert-ok"> Nenhum alerta ativo no momento.</div>';
   } else {
     alertBox.innerHTML = alertasData.alertas.map(a => `
       <div class="alert-item alert-${a.severidade}">
@@ -580,9 +580,9 @@ function aplicarSegmento(fatura_status, status_rede) {
 }
 
 function contatoCard(c) {
-  const faturaLabel = c.fatura_status === 'atrasada' ? '🔴 atrasada'
-    : c.fatura_status === 'em_aberto' ? '🟡 em aberto' : '🟢 paga';
-  const redeLabel = c.status_rede === 'instabilidade' ? '🔴 instabilidade' : '🟢 normal';
+  const faturaLabel = c.fatura_status === 'atrasada' ? 'atrasada'
+    : c.fatura_status === 'em_aberto' ? 'em aberto' : 'paga';
+  const redeLabel = c.status_rede === 'instabilidade' ? 'instabilidade' : 'normal';
 
   return `
   <div class="contato-card">
