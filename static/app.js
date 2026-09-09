@@ -1,3 +1,34 @@
+// ---------- Tela de início / navegação ----------
+document.body.classList.add('home-active');
+
+function enterApp() {
+  const home = document.getElementById('home-screen');
+  const shell = document.getElementById('app-shell');
+  if (!home || !shell || shell.style.display !== 'none') return;
+  home.classList.add('home-exit');
+  document.body.classList.remove('home-active');
+  shell.style.display = '';
+  shell.classList.add('fade-in');
+  setTimeout(() => {
+    home.style.display = 'none';
+    home.classList.remove('home-exit');
+    shell.classList.remove('fade-in');
+    window.scrollTo(0, 0);
+  }, 480);
+}
+
+function goHome() {
+  const home = document.getElementById('home-screen');
+  const shell = document.getElementById('app-shell');
+  if (!home || !shell) return;
+  shell.style.display = 'none';
+  home.style.display = '';
+  home.classList.add('home-enter');
+  document.body.classList.add('home-active');
+  window.scrollTo(0, 0);
+  setTimeout(() => home.classList.remove('home-enter'), 480);
+}
+
 // ---------- Estado ----------
 let appMode = 'cliente';        // 'cliente' | 'interno'
 let internalTab = 'dash';       // 'dash' | 'handoff' | 'contato'
@@ -285,7 +316,7 @@ function showConsentPrompt() {
   box.innerHTML = `
     <div style="margin-top:6px;">
       <button class="quick-btn" onclick="respondConsent(true)">Aceito</button>
-      <button class="quick-btn" onclick="respondConsent(false)" style="border-color:#6B6B70;color:#6B6B70;">Não aceito</button>
+      <button class="quick-btn quick-btn-muted" onclick="respondConsent(false)">Não aceito</button>
     </div>`;
   body.appendChild(box);
   body.scrollTop = body.scrollHeight;
@@ -433,7 +464,17 @@ function renderChartCanais(porCanal) {
     options: {
       responsive: true,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      scales: {
+        x: {
+          ticks: { color: 'rgba(255,255,255,0.6)' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0, color: 'rgba(255,255,255,0.6)' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+        },
+      },
     },
   });
 }

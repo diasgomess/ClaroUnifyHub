@@ -4,18 +4,81 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ClaroUnify Hub — MVP</title>
-<link rel="stylesheet" href="/static/style.css?v=8">
+<link rel="stylesheet" href="/static/style.css?v=11">
 <script src="/static/chart.umd.js?v=1"></script>
 </head>
 <body>
 <div id="toast-container" class="toast-container"></div>
-<div class="app-shell">
 
-  <div class="top-bar">
-    <div class="brand">
+<!-- Tela de início — especificações do projeto -->
+<div id="home-screen" class="home-screen">
+  <div class="splash-bg">
+    <div class="splash-glow splash-glow-1"></div>
+    <div class="splash-glow splash-glow-2"></div>
+    <div class="splash-grid"></div>
+  </div>
+
+  <div class="home-content">
+    <header class="home-header">
       <div>
-        <h1>ClaroUnify Hub</h1>
-        <div class="sub">Orquestrador conversacional omnicanal — MVP funcional</div>
+        <h1 class="splash-title home-title">
+          <span class="splash-claro">Claro</span><span class="splash-unify">Unify</span>
+          <span class="splash-hub">Hub</span>
+        </h1>
+        <p class="splash-tagline">Orquestrador conversacional omnicanal — MVP funcional</p>
+      </div>
+    </header>
+
+    <section class="spec-section">
+      <h2 class="spec-heading">Visão do projeto</h2>
+      <p class="spec-text">MVP 100% funcional do orquestrador conversacional descrito no Documento de Visão (Sprint 1 e 2). Demonstra o fluxo completo: canais → autenticação silenciosa → NLU → roteador de agentes → agentes especializados → backends → handoff → dashboard de KPIs.</p>
+    </section>
+
+    <section class="spec-section">
+      <h2 class="spec-heading">Áreas da demonstração</h2>
+      <ul class="spec-list">
+        <li><strong>Sou Cliente</strong> — escolha de canal (Site ou WhatsApp), chat unificado, migração entre canais sem perder contexto e campanha proativa.</li>
+        <li><strong>Painel Claro (interno)</strong> — Dashboard Admin com KPIs ao vivo, fila de Handoff com transcrição mascarada (LGPD) e Iniciar Contato individual ou em massa.</li>
+      </ul>
+    </section>
+
+    <section class="spec-section">
+      <h2 class="spec-heading">Stack e arquitetura</h2>
+      <div class="spec-stack">
+        <span class="spec-chip">FastAPI</span>
+        <span class="spec-chip">SQLite</span>
+        <span class="spec-chip">Ollama / Qwen3 4B</span>
+        <span class="spec-chip">Chart.js</span>
+        <span class="spec-chip">HTML / CSS / JS</span>
+      </div>
+      <p class="spec-text spec-note">Componentes reais e funcionais: roteador de agentes, handoff, KPIs, LGPD e continuidade entre canais. Mocks conscientes: WhatsApp simulado na UI, CRM/BSS em SQLite, eventos em memória.</p>
+    </section>
+
+    <div class="home-actions">
+      <button class="splash-enter" onclick="enterApp()">
+        Acessar demonstração
+        <span class="splash-arrow">→</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="app-shell" style="display:none;">
+  <div class="app-bg">
+    <div class="splash-glow splash-glow-1"></div>
+    <div class="splash-glow splash-glow-2"></div>
+    <div class="splash-grid"></div>
+  </div>
+
+  <div class="app-content">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <button class="back-home-btn" onclick="goHome()" title="Voltar para tela de início">← Início</button>
+      <div class="brand">
+        <div>
+          <h1><span class="brand-claro">Claro</span><span class="brand-unify">Unify</span> <span class="brand-hub">Hub</span></h1>
+          <div class="sub">Orquestrador conversacional omnicanal — MVP funcional</div>
+        </div>
       </div>
     </div>
     <div class="customer-switcher">
@@ -43,12 +106,10 @@
       <p class="picker-sub">Escolha um canal para começar — você pode migrar para o outro a qualquer momento sem repetir nada.</p>
       <div class="channel-cards">
         <div class="channel-card" onclick="selectChannel('site')">
-          <div class="channel-card-icon site-icon">🌐</div>
           <div class="channel-card-title">Site Web</div>
           <div class="channel-card-desc">Chat pelo widget do site da Claro</div>
         </div>
         <div class="channel-card" onclick="selectChannel('whatsapp')">
-          <div class="channel-card-icon wa-icon">💬</div>
           <div class="channel-card-title">WhatsApp</div>
           <div class="channel-card-desc">Continue de onde parar, no seu WhatsApp</div>
         </div>
@@ -63,7 +124,6 @@
 
       <div class="chat-frame" id="chat-frame">
         <div class="chat-header" id="chat-header">
-          <div class="avatar">CU</div>
           <div>
             <div class="name" id="chat-name">Assistente ClaroUnify</div>
             <div class="status" id="chat-status">online</div>
@@ -162,8 +222,9 @@
 
   </div>
 
+  </div>
 </div>
 
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>
