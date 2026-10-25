@@ -29,6 +29,7 @@ DB_PATH = Path(os.environ.get("DATABASE_PATH", str(Path(__file__).parent / "clar
 
 
 def get_db() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -85,6 +86,12 @@ def init_db() -> None:
             frustration_score  INTEGER NOT NULL DEFAULT 0
         );
 
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL,
+            actor_role TEXT NOT NULL, actor TEXT NOT NULL,
+            action TEXT NOT NULL, target TEXT, detail TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS messages (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             customer_id TEXT NOT NULL REFERENCES sessions(customer_id),
@@ -95,6 +102,10 @@ def init_db() -> None:
         );
         """
     )
+    conn.execute("""CREATE TABLE IF NOT EXISTS handoff_agents (
+      customer_id TEXT PRIMARY KEY, agent TEXT NOT NULL, assigned_at REAL NOT NULL,
+      FOREIGN KEY(customer_id) REFERENCES sessions(customer_id) ON DELETE CASCADE
+    )""")
     conn.commit()
 
     already_seeded = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] > 0
@@ -399,3 +410,21 @@ def reset_all_sessions() -> None:
     conn.execute("DELETE FROM sessions")
     conn.commit()
     conn.close()
+
+# Auditoria persistente da versão v4
+def audit(actor_role: str, actor: str, action: str, target: str = "", detail: str = None):
+    conn = get_db()
+    try:
+        conn.execute("INSERT INTO audit_log (ts, actor_role, actor, action, target, detail) VALUES (?,?,?,?,?,?)",
+                     (time.time(), actor_role, actor, action, target, detail))
+        conn.commit()
+    finally:
+        conn.close()
+
+def list_audit(limit: int = 50):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()

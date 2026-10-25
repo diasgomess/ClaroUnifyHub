@@ -23,6 +23,12 @@ Toda a lógica de roteamento, handoff, continuidade entre canais e KPIs é real 
 """
 
 import json
+import hmac
+import hashlib
+import secrets
+import jwt
+from datetime import datetime, timedelta, timezone
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import logging
 import os
 import re
@@ -33,7 +39,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, Response, Depends, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.types import Scope
@@ -61,6 +67,140 @@ logger = logging.getLogger("clarounify")
 
 app = FastAPI(title="ClaroUnify Hub — MVP")
 
+
+# v4 + v5: JWTs duráveis entre reinicializações e isolamento opcional do cliente.
+# Ative CUSTOMER_AUTH_REQUIRED apenas após conectar um provedor de identidade real.
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+CUSTOMER_AUTH_REQUIRED = os.environ.get("CUSTOMER_AUTH_REQUIRED", "false").lower() == "true"
+TOKEN_TTL_S = int(os.environ.get("TOKEN_TTL_S", "3600"))
+
+def _customer_claims(request: Request):
+    header = request.headers.get("Authorization", "")
+    if not header.lower().startswith("bearer "):
+        return None
+    if len(JWT_SECRET) < 32:
+        raise HTTPException(503, "JWT_SECRET precisa conter pelo menos 32 caracteres")
+    try:
+        claims = jwt.decode(header.split(" ", 1)[1], JWT_SECRET, algorithms=["HS256"], options={"require": ["sub", "exp"]})
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Token do cliente expirado ou inválido")
+    if claims.get("role") != "customer":
+        raise HTTPException(403, "Perfil não autorizado")
+    return claims
+
+def _check_customer(request: Request, customer_id: str):
+    claims = _customer_claims(request)
+    if claims is not None:
+        if claims["sub"] != customer_id:
+            raise HTTPException(403, "Acesso permitido somente aos próprios dados")
+    elif CUSTOMER_AUTH_REQUIRED:
+        # O cookie admin não substitui a identificação segura do cliente final.
+        require_admin(request)
+
+def record_audit(action: str, target: str = "", request: Request = None):
+    actor = "admin" if request is None else "admin-cookie"
+    db.audit("admin", actor, action, target)
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+@app.exception_handler(HTTPException)
+async def http_error_json(request: Request, exc: HTTPException):
+    return JSONResponse({"error": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+
+# Admin: password from Railway Variables, signed HttpOnly session cookie.
+# No insecure default credential: an unset password means admin is unavailable.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+ADMIN_SESSION_SECRET = os.environ.get("ADMIN_SESSION_SECRET", "")
+ADMIN_AUTH_DISABLED = os.environ.get("ADMIN_AUTH_DISABLED", "false").lower() == "true" and os.environ.get("APP_ENV") == "test"
+ADMIN_COOKIE = "clarounify_admin"
+
+def _admin_serializer():
+    if not ADMIN_PASSWORD or len(ADMIN_SESSION_SECRET) < 32:
+        raise HTTPException(503, "Configure ADMIN_PASSWORD e ADMIN_SESSION_SECRET (mínimo 32 caracteres).")
+    return URLSafeTimedSerializer(ADMIN_SESSION_SECRET, salt="clarounify-admin-v1")
+
+def require_admin(request: Request):
+    if ADMIN_AUTH_DISABLED:
+        return
+    serializer = _admin_serializer()
+    token = request.cookies.get(ADMIN_COOKIE, "")
+    try:
+        if serializer.loads(token, max_age=8 * 3600) != "admin":
+            raise HTTPException(401, "Acesso administrativo não autorizado")
+    except (BadSignature, SignatureExpired):
+        raise HTTPException(401, "Faça login no Painel Claro")
+
+class AdminLoginIn(BaseModel):
+    password: str
+
+@app.post("/api/admin/login")
+def admin_login(payload: AdminLoginIn, request: Request, response: Response):
+    serializer = _admin_serializer()
+    # Both branches perform a PBKDF2 derivation; avoid an easily measurable cheap failure path.
+    supplied = hashlib.pbkdf2_hmac("sha256", payload.password.encode(), b"clarounify-login", 160000)
+    expected = hashlib.pbkdf2_hmac("sha256", ADMIN_PASSWORD.encode(), b"clarounify-login", 160000)
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(401, "Senha incorreta")
+    response.set_cookie(ADMIN_COOKIE, serializer.dumps("admin"), max_age=28800,
+                        httponly=True, secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
+                        samesite="strict", path="/")
+    return {"ok": True}
+
+@app.post("/api/admin/logout")
+def admin_logout(response: Response):
+    response.delete_cookie(ADMIN_COOKIE, path="/")
+    return {"ok": True}
+
+@app.get("/api/admin/me")
+def admin_me(request: Request):
+    require_admin(request)
+    return {"authenticated": True}
+
+@app.middleware("http")
+async def protect_admin_routes(request: Request, call_next):
+    path = request.url.path
+    protected = (path.startswith("/api/admin/") and path not in ("/api/admin/login", "/api/admin/me", "/api/admin/logout")) or path in (
+        "/api/kpis", "/api/alertas", "/api/events", "/api/handoff-queue", "/api/reset", "/api/capacidade", "/api/llm-status", "/api/campanha-proativa"
+    ) or path.startswith(("/api/handoff-queue/", "/api/lgpd/", "/api/campanha-proativa/"))
+    if protected:
+        try:
+            require_admin(request)
+        except HTTPException as exc:
+            return JSONResponse({"error": str(exc.detail)}, status_code=exc.status_code)
+    # Reject cross-origin state-changing requests (SameSite cookie is additional defense).
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and protected:
+        origin = request.headers.get("origin")
+        if origin:
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            host = request.headers.get("host", "")
+            if parsed.netloc != host or parsed.scheme not in ("http", "https"):
+                return JSONResponse({"error": "Origem não autorizada"}, status_code=403)
+    return await call_next(request)
+
+@app.get("/api/health")
+@app.get("/health")
+def health():
+    try:
+        connection = db.get_db()
+        connection.execute("SELECT 1")
+        connection.close()
+        return {"status": "ok"}
+    except Exception:
+        raise HTTPException(503, "Banco de dados indisponível")
+
+@app.get("/api/demo/clientes")
+def demo_clientes():
+    # Fixture identities only; never use with real customer data.
+    return {"items": [{"id": c["id"], "nome": c["nome"]} for c in db.list_customers(limit=100)["items"]]}
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -107,6 +247,10 @@ AUTH_TOKENS: dict = {}  # token -> {"customer_id": ..., "issued_at": ..., "chann
 
 
 def issue_silent_token(customer_id: str, channel: str) -> str:
+    if len(JWT_SECRET) >= 32:
+        now = int(time.time())
+        return jwt.encode({"sub": customer_id, "ch": channel, "iat": now, "exp": now + TOKEN_TTL_S,
+                           "jti": uuid.uuid4().hex, "role": "customer"}, JWT_SECRET, algorithm="HS256")
     token = uuid.uuid4().hex
     AUTH_TOKENS[token] = {"customer_id": customer_id, "issued_at": time.time(), "channel_origem": channel}
     return token
@@ -115,6 +259,12 @@ def issue_silent_token(customer_id: str, channel: str) -> str:
 def resolve_token(token: Optional[str]) -> Optional[str]:
     if not token:
         return None
+    if len(JWT_SECRET) >= 32:
+        try:
+            claims = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"require": ["sub", "exp"]})
+            return claims["sub"] if claims.get("role") == "customer" else None
+        except jwt.PyJWTError:
+            return None
     entry = AUTH_TOKENS.get(token)
     return entry["customer_id"] if entry else None
 
@@ -258,10 +408,19 @@ def mask_name(full_name: str) -> str:
     return f"{parts[0]} {parts[-1][0]}."
 
 
-CONSENT_TEXT = (
+# Preserve mensagens antigas para que o aceite após uma atualização do projeto
+# ainda processe a pergunta feita antes da atualização.
+LEGACY_CONSENT_TEXT = (
     "Para te atender, preciso registrar esta conversa e consultar seus dados de conta "
     "(fatura, plano, status de rede) conforme a LGPD. Posso continuar?"
 )
+CONSENT_TEXT = (
+    "Para continuar seu atendimento, preciso salvar esta conversa e consultar "
+    "os dados necessários da sua conta, como plano, faturas e situação da rede. "
+    "Usarei essas informações para analisar sua solicitação, conforme a LGPD. "
+    "Você autoriza?"
+)
+CONSENT_PROMPT_TEXTS = (CONSENT_TEXT, LEGACY_CONSENT_TEXT)
 
 
 # ---------------------------------------------------------------------------
@@ -629,7 +788,9 @@ class AuthIn(BaseModel):
 
 
 @app.post("/api/auth/silent")
-def auth_silent(payload: AuthIn):
+def auth_silent(payload: AuthIn, request: Request):
+    if CUSTOMER_AUTH_REQUIRED:
+        require_admin(request)
     """RF005 — chamado automaticamente pelo frontend ao trocar de canal (nunca pelo
     cliente digitando login/senha). Emite um token opaco que identifica o cliente
     silenciosamente nos canais seguintes, sem repetir autenticação."""
@@ -663,22 +824,217 @@ class ConsentIn(BaseModel):
 
 
 @app.post("/api/consent")
-def give_consent(payload: ConsentIn):
+def give_consent(payload: ConsentIn, request: Request):
+    _check_customer(request, payload.customer_id)
+
     customer_id = get_customer(payload.customer_id)
     session = get_session(customer_id)
+    was_accepted = session["consent_given"]
+    # A primeira mensagem foi registrada antes de solicitar o aceite, mas ainda
+    # não foi processada. Recupera-a do SQLite para sobreviver a um refresh.
+    pending = None
+    if payload.accepted and not was_accepted:
+        history = list(session["history"])
+        # Só reproduz mensagens realmente interrompidas pelo aviso de LGPD.
+        for idx in range(len(history) - 1, 0, -1):
+            item = history[idx]
+            if item["author"] == "bot" and item["text"] in CONSENT_PROMPT_TEXTS:
+                previous = history[idx - 1]
+                if previous["author"] == "cliente" and previous["text"].strip():
+                    pending = previous
+                break
     session["consent_given"] = payload.accepted
     log_event("consentimento", customer_id, aceito=payload.accepted)
-    return {"ok": True}
+    result = {"ok": True, "processed_previous": False}
+    if pending is not None:
+        # Processa normalmente (NLU, backend, handoff e NPS), sem registrar
+        # novamente a mensagem do cliente ou consumir rate limit de envio.
+        response = _process_chat(
+            ChatIn(customer_id=customer_id, channel=pending["channel"], text=pending["text"]),
+            request, replay_pending=True,
+        )
+        result.update(processed_previous=True, reply=response.reply, ask_nps=response.ask_nps, intent=response.intent, handoff=response.handoff)
+    return result
+
+
+def contextual_classification(text: str, session: db.Session) -> dict:
+    """Recupera intenção somente para respostas curtas ligadas a um assunto anterior conhecido.
+    Não supõe contratação, cancelamento nem afirmações que o cliente não fez.
+    """
+    result = classify_intent_hybrid(text)
+    if result["intent"] != "nao_entendido":
+        return result
+    phrase = " ".join(text.lower().strip(" .!?¡¿").split())
+    short_followups = {"sim", "pode ser", "quero essa opção", "quero saber mais", "me explica", "pode explicar", "e o valor", "qual o valor", "continua", "pode continuar", "essa opção"}
+    previous = session.get("last_intent")
+    if phrase not in short_followups or previous not in {"suporte", "venda", "informacao"}:
+        return result
+    customer_history = [item for item in session["history"][:-1] if item["author"] == "cliente"]
+    if not customer_history:
+        return result
+    return {"intent": previous, "confidence": 0.72, "all_intents": [previous], "urgent": False, "_source": "contexto"}
+
+
+def handoff_brief(session: db.Session) -> dict:
+    """Resumo extrativo auditável de mensagens do cliente, sem inventar fatos pessoais."""
+    questions = [x["text"].strip() for x in session["history"] if x["author"] == "cliente" and x["text"].strip()]
+    last = questions[-3:]
+    reason = {"cancelamento": "Pedido de cancelamento", "suporte": "Problema técnico",
+              "informacao": "Informações de conta", "venda": "Contratação/plano",
+              "handoff_explicito": "Solicitação de operador"}.get(session["last_intent"], "Análise da solicitação")
+    urgency = session["frustration_score"] >= 2
+    priority = "Alta" if urgency or session["last_intent"] == "cancelamento" else "Normal"
+    diagnostic_messages = [x["text"] for x in session["history"]
+                           if x["author"] == "bot" and x["text"].startswith(DIAGNOSTIC_PREFIX)]
+    network_status = None
+    if diagnostic_messages:
+        try:
+            item = json.loads(diagnostic_messages[-1][len(DIAGNOSTIC_PREFIX):])
+            network_status = item.get("label")
+        except (ValueError, TypeError):
+            pass
+    return {"reason": reason, "priority": priority,
+            "summary": " · ".join(x[:180] for x in last) or "Sem mensagens do cliente registradas",
+            "customer_messages": len(questions), "network_diagnostic": network_status}
+
+
+PLAN_PREFIX = "[[SIMULADOR_PLANOS_V1]]"
+
+class PlanSimulationIn(BaseModel):
+    customer_id: str
+    channel: str = "site"
+    usage: str = "moderado"
+    budget: str = "intermediario"
+
+class PlanSelectionIn(BaseModel):
+    customer_id: str
+    channel: str = "site"
+    plan_name: str
+
+
+def simulate_plans(customer_id: str, usage: str, budget: str) -> dict:
+    if usage not in ("leve", "moderado", "intenso", "residencial") or budget not in ("economico", "intermediario", "premium"):
+        raise HTTPException(422, "Perfil ou orçamento inválido")
+    catalog = db.get_catalog()
+    if not catalog:
+        return {"plans": [], "recommended": None, "current_plan": (db.get_customer_record(customer_id) or {}).get("plano"),
+                "usage": usage, "budget": budget, "notice": "Catálogo demonstrativo sem ofertas cadastradas"}
+    desired = 40 if usage == "leve" else 80
+    def score(plan):
+        name = plan["nome"].lower()
+        residential = "fibra" in name
+        capacity = 500 if residential else (80 if "80gb" in name else 40)
+        target_match = 0 if (usage == "residencial") == residential else 1000
+        demand_gap = 0 if residential else max(0, desired - capacity) * (3 if usage == "intenso" else 1)
+        price_factor = {"economico": 2.0, "intermediario": 0.7, "premium": 0.1}[budget]
+        return (target_match + demand_gap + float(plan["preco"]) * price_factor, float(plan["preco"]), name)
+    ordered = sorted(catalog, key=score)
+    return {"plans": ordered, "recommended": ordered[0]["nome"],
+            "current_plan": (db.get_customer_record(customer_id) or {}).get("plano"),
+            "usage": usage, "budget": budget, "notice": "Preços e planos fictícios do catálogo demonstrativo; nenhuma contratação é efetuada."}
+
+@app.post("/api/plans/simulate")
+def plans_simulate(payload: PlanSimulationIn, request: Request):
+    _check_customer(request, payload.customer_id)
+    if payload.channel not in ("site", "whatsapp"):
+        raise HTTPException(422, "Canal inválido")
+    cid = get_customer(payload.customer_id)
+    session = get_session(cid)
+    if not session["consent_given"]:
+        raise HTTPException(403, "Aceite a LGPD antes de consultar seus planos")
+    result = simulate_plans(cid, payload.usage, payload.budget)
+    session["history"].append({"author": "bot", "channel": payload.channel,
+                               "text": PLAN_PREFIX + json.dumps(result, ensure_ascii=False), "ts": time.time()})
+    session["updated_at"] = time.time()
+    log_event("simulacao_planos", cid, perfil=payload.usage, orcamento=payload.budget)
+    return result
+
+@app.post("/api/plans/select")
+def plans_select(payload: PlanSelectionIn, request: Request):
+    _check_customer(request, payload.customer_id)
+    if payload.channel not in ("site", "whatsapp"):
+        raise HTTPException(422, "Canal inválido")
+    cid = get_customer(payload.customer_id)
+    session = get_session(cid)
+    if not session["consent_given"]:
+        raise HTTPException(403, "Aceite a LGPD antes de solicitar um plano")
+    catalog = db.get_catalog()
+    match = next((p for p in catalog if p["nome"] == payload.plan_name), None)
+    if not match:
+        raise HTTPException(422, "Plano não encontrado no catálogo")
+    session["history"].append({"author": "cliente", "channel": payload.channel,
+      "text": f"Tenho interesse no plano {match['nome']} (R$ {match['preco']:.2f}/mês). Quero falar com um atendente sobre essa opção.", "ts": time.time()})
+    session["status"] = "handoff"
+    session["last_intent"] = "venda"
+    session["history"].append({"author": "bot", "channel": payload.channel,
+      "text": "Solicitação encaminhada ao atendimento humano. A escolha foi incluída no histórico; nenhuma contratação foi realizada.", "ts": time.time()})
+    session["updated_at"] = time.time()
+    log_event("interesse_plano_handoff", cid, plano=match["nome"])
+    return {"ok": True, "status": "handoff", "plan": match["nome"]}
+
+DIAGNOSTIC_PREFIX = "[[DIAGNOSTICO_REDE_V1]]"
+
+
+def build_network_diagnostic(customer_id: str) -> dict:
+    """Fatos da base OSS fictícia; não são medições de rede reais."""
+    oss = db.get_network_status(customer_id)
+    if not oss:
+        return {"status": "indisponivel", "label": "Dados indisponíveis", "region": "Não informada",
+                "eta": None, "description": "Não há dados de rede cadastrados para esta conta.",
+                "next_step": "Solicite análise de um atendente.", "source": "OSS simulado"}
+    status = str(oss.get("status_rede") or "").lower()
+    region = str(oss.get("regiao") or "Não informada")
+    eta = str(oss.get("previsao_normalizacao") or "") if status == "instabilidade" else None
+    if status == "instabilidade":
+        return {"status": "instabilidade", "label": "Instabilidade detectada", "region": region,
+                "eta": eta or None, "description": "Uma ocorrência de rede pode afetar sua conexão.",
+                "next_step": "Aguarde a previsão estimada ou peça suporte humano.", "source": "OSS simulado"}
+    if status == "normal":
+        return {"status": "normal", "label": "Rede sem ocorrência registrada", "region": region,
+                "eta": None, "description": "O OSS simulado não registra instabilidade coletiva na região.",
+                "next_step": "Se persistir, solicite suporte humano para análise individual.", "source": "OSS simulado"}
+    return {"status": "indisponivel", "label": "Status não identificado", "region": region,
+            "eta": None, "description": "Não foi possível interpretar o status cadastrado.",
+            "next_step": "Solicite atendimento humano.", "source": "OSS simulado"}
+
+
+class DiagnosticIn(BaseModel):
+    customer_id: str
+    channel: str = "site"
+
+
+@app.post("/api/network/diagnostic")
+def network_diagnostic(payload: DiagnosticIn, request: Request):
+    _check_customer(request, payload.customer_id)
+    if payload.channel not in ("site", "whatsapp"):
+        raise HTTPException(422, "Canal inválido")
+    cid = get_customer(payload.customer_id)
+    session = get_session(cid)
+    if not session["consent_given"]:
+        raise HTTPException(403, "Aceite a LGPD antes de consultar a rede")
+    diagnostic = build_network_diagnostic(cid)
+    # Mensagem estruturada persistida no histórico, tratada como card pelo frontend.
+    session["history"].append({"author": "bot", "channel": payload.channel,
+        "text": DIAGNOSTIC_PREFIX + json.dumps(diagnostic, ensure_ascii=False), "ts": time.time()})
+    session["updated_at"] = time.time()
+    log_event("diagnostico_rede_simulado", cid, status=diagnostic["status"], canal=payload.channel)
+    return diagnostic
 
 
 @app.post("/api/chat", response_model=ChatOut)
-def chat(payload: ChatIn):
+def chat(payload: ChatIn, request: Request):
+    return _process_chat(payload, request)
+
+
+def _process_chat(payload: ChatIn, request: Request, replay_pending: bool = False):
+    _check_customer(request, payload.customer_id)
+
     # RF005: se veio um token de SSO válido, ele manda — o customer_id no corpo vira
     # só um fallback (usado pelo seletor de demo e pelos testes automatizados).
     customer_id = resolve_token(payload.auth_token) or get_customer(payload.customer_id)
     session = get_session(customer_id)
 
-    if not check_rate_limit(customer_id):
+    if not replay_pending and not check_rate_limit(customer_id):
         logger.warning("Rate limit estourado para cliente %s no canal %s", mask_id(customer_id), payload.channel)
         log_event("rate_limit_bloqueado", customer_id, canal=payload.channel)
         return ChatOut(
@@ -687,8 +1043,9 @@ def chat(payload: ChatIn):
             intent="rate_limited", confidence=1.0, agent=None, status=session["status"], handoff=False,
         )
 
-    session["history"].append({"author": "cliente", "channel": payload.channel, "text": payload.text, "ts": time.time()})
-    log_event("mensagem_cliente", customer_id, channel=payload.channel, text=payload.text)
+    if not replay_pending:
+        session["history"].append({"author": "cliente", "channel": payload.channel, "text": payload.text, "ts": time.time()})
+        log_event("mensagem_cliente", customer_id, channel=payload.channel, text=payload.text)
 
     # LGPD: primeira interação exige aviso e aceite antes de processar a solicitação.
     if not session["consent_given"]:
@@ -696,13 +1053,13 @@ def chat(payload: ChatIn):
         return ChatOut(customer_id=customer_id, reply=CONSENT_TEXT, intent="consentimento_pendente",
                        confidence=1.0, agent=None, status=session["status"], handoff=False, needs_consent=True)
 
-    if session["status"] == "handoff":
-        reply = "Sua conversa já foi encaminhada para um atendente humano com todo o contexto preservado."
+    if session["status"] in ("handoff", "human"):
+        reply = "Seu atendimento humano está em andamento. Um atendente responderá em breve."
         session["history"].append({"author": "bot", "channel": payload.channel, "text": reply, "ts": time.time()})
         return ChatOut(customer_id=customer_id, reply=reply, intent=session["last_intent"] or "-",
-                       confidence=1.0, agent=session["current_agent"], status="handoff", handoff=True)
+                       confidence=1.0, agent=session["current_agent"], status=session["status"], handoff=True)
 
-    classification = classify_intent_hybrid(payload.text)
+    classification = contextual_classification(payload.text, session)
     intent = classification["intent"]
     confidence = classification["confidence"]
     all_intents = classification["all_intents"]
@@ -773,14 +1130,18 @@ def chat(payload: ChatIn):
 
 
 @app.get("/api/session/{customer_id}")
-def get_session_view(customer_id: str):
+def get_session_view(customer_id: str, request: Request):
+    _check_customer(request, customer_id)
+
     customer_id = get_customer(customer_id)
     session = get_session(customer_id)
     return {"crm": db.get_customer_record(customer_id), "session": session}
 
 
 @app.post("/api/nps")
-def submit_nps(payload: NPSIn):
+def submit_nps(payload: NPSIn, request: Request):
+    _check_customer(request, payload.customer_id)
+
     customer_id = get_customer(payload.customer_id)
     session = get_session(customer_id)
     session["nps"] = payload.score
@@ -807,10 +1168,12 @@ def handoff_queue():
     queue = []
     for s in db.list_sessions():
         cid = s["customer_id"]
-        if s["status"] == "handoff":
+        if s["status"] in ("handoff", "human"):
             crm = db.get_customer_record(cid) or {}
             queue.append({
                 "customer_id": cid,
+                "status": s["status"],
+                "assigned_agent": s["current_agent"] if s["status"] == "human" else None,
                 "nome": mask_name(crm.get("nome", "Cliente")),
                 "plano": crm.get("plano", "-"),
                 "cliente_desde": crm.get("cliente_desde", "-"),
@@ -818,15 +1181,79 @@ def handoff_queue():
                 "last_intent": s["last_intent"],
                 "frustration_score": s["frustration_score"],
                 "history": s["history"],
+                "brief": handoff_brief(s),
             })
     return queue
 
 
+# Preferência de canal para retorno da fila (simulação: sem integração Meta/WhatsApp).
+notify_prefs = {}
+
+class NotifyIn(BaseModel):
+    customer_id: str
+    channel: str
+
+@app.post("/api/handoff/notify")
+def handoff_notify(payload: NotifyIn, request: Request):
+    _check_customer(request, payload.customer_id)
+    if payload.channel not in ("site", "whatsapp"):
+        raise HTTPException(422, "Canal inválido")
+    cid = get_customer(payload.customer_id)
+    session = get_session(cid)
+    if session["status"] != "handoff":
+        raise HTTPException(409, "Conversa não está aguardando atendimento")
+    notify_prefs[cid] = payload.channel
+    label = "WhatsApp" if payload.channel == "whatsapp" else "Site Web"
+    msg = f"Preferência registrada: {label}. Nesta demonstração, o aviso fica registrado no histórico, sem envio externo."
+    session["history"].append({"author": "bot", "channel": payload.channel, "text": msg, "ts": time.time()})
+    log_event("handoff_aviso_configurado", cid, canal=payload.channel)
+    return {"ok": True, "reply": msg}
+
+class AgentActionIn(BaseModel):
+    agent: str = Field(default="Operador Claro", min_length=2, max_length=80)
+
+class AgentReplyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
 @app.post("/api/handoff-queue/{customer_id}/assumir")
-def assumir_handoff(customer_id: str):
-    session = get_session(get_customer(customer_id))
+def assumir_handoff(customer_id: str, payload: AgentActionIn = AgentActionIn()):
+    record_audit("handoff_assumir", customer_id)
+    cid = get_customer(customer_id)
+    session = get_session(cid)
+    if session["status"] not in ("handoff", "human"):
+        raise HTTPException(409, "Esta conversa não está na fila")
+    session["status"] = "human"
+    session["current_agent"] = payload.agent
+    conn = db.get_db()
+    conn.execute("INSERT OR REPLACE INTO handoff_agents VALUES (?,?,?)", (cid, payload.agent, time.time()))
+    conn.commit()
+    conn.close()
+    log_event("handoff_assumido", cid, operador=payload.agent)
+    return {"ok": True, "status": "human"}
+
+@app.post("/api/handoff-queue/{customer_id}/responder")
+def responder_handoff(customer_id: str, payload: AgentReplyIn):
+    record_audit("handoff_responder", customer_id)
+    cid = get_customer(customer_id)
+    session = get_session(cid)
+    if session["status"] != "human":
+        raise HTTPException(409, "Assuma a conversa antes de responder")
+    history = session["history"]
+    channel = history[-1]["channel"] if history else "site"
+    history.append({"author": "atendente", "channel": channel, "text": payload.text, "ts": time.time()})
+    log_event("resposta_humana", cid)
+    return {"ok": True}
+
+@app.post("/api/handoff-queue/{customer_id}/encerrar")
+def encerrar_handoff(customer_id: str):
+    record_audit("handoff_encerrar", customer_id)
+    cid = get_customer(customer_id)
+    session = get_session(cid)
+    if session["status"] != "human":
+        raise HTTPException(409, "Esta conversa não está em atendimento")
     session["status"] = "resolved"
-    log_event("handoff_assumido", customer_id)
+    session["history"].append({"author": "atendente", "channel": "site", "text": "Atendimento finalizado.", "ts": time.time()})
+    log_event("atendimento_humano_finalizado", cid)
     return {"ok": True}
 
 
@@ -946,6 +1373,7 @@ def admin_listar_clientes(q: str = "", fatura_status: str = "", status_rede: str
 
 @app.post("/api/admin/iniciar-contato")
 def admin_iniciar_contato(payload: IniciarContatoIn):
+    record_audit("iniciar_contato", payload.customer_id)
     customer_id = get_customer(payload.customer_id)
     ok, resultado = montar_mensagem_contato(customer_id, payload.motivo, payload.mensagem_personalizada)
     if not ok:
@@ -956,6 +1384,7 @@ def admin_iniciar_contato(payload: IniciarContatoIn):
 
 @app.post("/api/admin/iniciar-contato-lote")
 def admin_iniciar_contato_lote(payload: IniciarContatoLoteIn):
+    record_audit("contato_em_lote")
     """Contato em massa por segmento — o equivalente realista de 'campanha
     proativa' numa base com milhões de clientes: o atendente não escolhe um por
     um, escolhe um FILTRO (ex.: 'todos com fatura atrasada') e dispara pra todos
@@ -1035,6 +1464,45 @@ def kpis():
     }
 
 
+@app.get("/api/admin/analytics")
+def admin_analytics(days: int = 7):
+    """Compara mensagens do período atual com janela imediatamente anterior, sem dados simulados extras."""
+    days = max(1, min(days, 90))
+    now = time.time()
+    start = now - days * 86400
+    previous_start = start - days * 86400
+    conn = db.get_db()
+    rows = conn.execute("SELECT ts, author, channel FROM messages WHERE ts >= ? AND ts <= ? ORDER BY ts", (previous_start, now)).fetchall()
+    intents = conn.execute("SELECT last_intent, COUNT(*) total FROM sessions WHERE last_intent IS NOT NULL GROUP BY last_intent ORDER BY total DESC LIMIT 8").fetchall()
+    sessions = conn.execute("SELECT status, created_at, updated_at FROM sessions WHERE created_at >= ? AND created_at <= ?", (start, now)).fetchall()
+    conn.close()
+    series, channels = {}, {"site": 0, "whatsapp": 0}
+    current_count = previous_count = 0
+    for row in rows:
+        if row["author"] != "cliente":
+            continue
+        if row["ts"] < start:
+            previous_count += 1
+            continue
+        current_count += 1
+        day = datetime.fromtimestamp(row["ts"], timezone.utc).strftime("%Y-%m-%d")
+        series[day] = series.get(day, 0) + 1
+        channels[row["channel"]] = channels.get(row["channel"], 0) + 1
+    dates = [(datetime.now(timezone.utc) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1)]
+    resolved = [row for row in sessions if row["status"] == "resolved"]
+    # Duração da sessão não equivale a SLA/tempo de resposta do operador.
+    avg_duration = round(sum(max(0, row["updated_at"] - row["created_at"]) for row in resolved) / len(resolved) / 60, 1) if resolved else None
+    change = round((current_count - previous_count) / previous_count * 100, 1) if previous_count else None
+    return {"days": days, "series": [{"date": day, "messages": series.get(day, 0)} for day in dates],
+            "channels": channels, "intents": [dict(r) for r in intents],
+            "comparison": {"current_messages": current_count, "previous_messages": previous_count,
+                           "change_pct": change, "period_days": days},
+            "operations": {"sessions_created": len(sessions), "resolved_sessions": len(resolved),
+                           "resolution_rate_pct": round(len(resolved) / len(sessions) * 100, 1) if sessions else None,
+                           "average_session_duration_minutes": avg_duration},
+            "disclaimer": "Dados de demonstração. Duração da sessão não representa tempo médio de resposta do atendente."}
+
+
 @app.get("/api/alertas")
 def alertas():
     """RNF006 — alertas automáticos simples. Compara os KPIs atuais contra limiares
@@ -1075,7 +1543,9 @@ def get_events(limit: int = 30, mask: bool = True):
 
 
 @app.get("/api/lgpd/exportar/{customer_id}")
-def exportar_dados(customer_id: str):
+def exportar_dados(customer_id: str, request: Request):
+    _check_customer(request, customer_id)
+
     """Direito de portabilidade — devolve tudo que o Hub guarda sobre o cliente."""
     customer_id = get_customer(customer_id)
     sessao = dict(db.get_or_create_session(customer_id)) if db.session_exists(customer_id) else None
@@ -1087,7 +1557,9 @@ def exportar_dados(customer_id: str):
 
 
 @app.delete("/api/lgpd/excluir/{customer_id}")
-def excluir_dados(customer_id: str):
+def excluir_dados(customer_id: str, request: Request):
+    _check_customer(request, customer_id)
+
     """Direito de eliminação — apaga a sessão conversacional (não os cadastros
     de CRM/BSS, que são sistemas de registro fora do escopo do Hub)."""
     customer_id = get_customer(customer_id)
@@ -1134,6 +1606,10 @@ def capacidade():
     }
 
 
+@app.get("/api/admin/audit")
+def admin_audit(limit: int = 50):
+    return db.list_audit(max(1, min(limit, 200)))
+
 @app.get("/api/llm-status")
 def llm_status():
     """Mostra se o Qwen3 4B (via Ollama) está disponível ou se o sistema está
@@ -1144,6 +1620,8 @@ def llm_status():
 
 @app.post("/api/reset")
 def reset():
+    record_audit("reset")
+    notify_prefs.clear()
     db.reset_all_sessions()
     events.clear()
     _rate_log.clear()

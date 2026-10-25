@@ -721,3 +721,7 @@ Aqui o gargalo é burocrático, não técnico:
 9. Adicionar CI (GitHub Actions) rodando `pytest` a cada push — a suíte já existe
    e roda em menos de 1s, falta só o workflow.
 
+
+
+### v8 — Diagnóstico visual de rede (Sprint 4)
+Após o consentimento LGPD, problemas reconhecidos de suporte geram um card com status da rede, região e previsão se disponível, usando somente o OSS simulado. A opção Solicitar atendente usa o fluxo de handoff já existente. O histórico contém o resultado estruturado e o resumo de atendimento mostra o último estado de rede. Endpoint `POST /api/network/diagnostic` com `customer_id` e `channel` (site ou whatsapp). Sem ligação com infraestrutura real da Claro.

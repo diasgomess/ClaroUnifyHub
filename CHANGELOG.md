@@ -189,3 +189,49 @@ atinge todo o segmento filtrado — não só uma amostra dele.
 O padrão em todos os ciclos: uma crítica (minha, do usuário, ou de uma auditoria
 formal contra requisitos) → um diagnóstico da causa raiz (não só do sintoma) → uma
 correção testada de ponta a ponta antes de considerar resolvido.
+
+## Upgrade v5 — Painel protegido, analytics e atendimento humano
+- Login administrativo com sessão assinada e cookie HttpOnly + SameSite.
+- Proteção de endpoints operacionais e separação do seletor público de clientes fictícios.
+- Evolução diária de mensagens e ranking de intenções no dashboard.
+- Atendimento humano assumido, resposta manual persistida e encerramento explícito.
+- Chat com escape de conteúdo e horário por mensagem; estado de carregamento.
+- Healthcheck, suporte a porta PORT do Railway e documentação de volume SQLite.
+- Testes de autenticação e regressão de handoff.
+
+## v6.1 — Continuidade após consentimento LGPD
+- Ao aceitar a LGPD, a primeira mensagem pendente é processada automaticamente, sem solicitar novo envio.
+- O texto e canal da mensagem pendente são recuperados do histórico persistido no SQLite.
+- Recusa não processa a solicitação e aceites repetidos não duplicam respostas.
+- Testes de regressão para os três cenários.
+
+## v6.2 — melhoria visual do consentimento LGPD
+- Reestilizado o bloco de aceite da LGPD no chat com card dedicado, melhor hierarquia visual e botões primário/secundário.
+- Melhorada a responsividade do componente em telas menores.
+- Mantido o fluxo de continuidade da mensagem pendente após aceite.
+
+## v6.3 — texto e ícones LGPD
+- Mensagem LGPD mais objetiva e compreensível; deixa claro quais dados são consultados e para qual finalidade.
+- Ícones SVG para cadeado, aceite e recusa, sem dependências externas.
+- Compatibilidade com mensagens LGPD anteriores já salvas: o aceite mantém o processamento da pergunta pendente.
+
+## v7 — melhorias demonstráveis para a Sprint 4
+- Classificação contextual conservadora de mensagens curtas para intenções anteriores confirmadas.
+- Dashboard com comparação contra período anterior e indicadores operacionais derivados de SQLite.
+- Resumo extrativo e prioridade na fila de transferência humana.
+- Ajustes mobile, teclado, legibilidade e preferência por redução de movimentos.
+- Três testes de regressão adicionados e roteiro de documentação para a Sprint 4.
+
+
+## v8 — Sprint 4: central de diagnóstico visual
+- Consulta ao OSS fictício, card no chat, histórico persistente e resumo no handoff.
+- Testes adicionais para LGPD, rede sem dados, histórico e validação de canal.
+- Correção de exceção em `loadHistory` por variáveis não definidas no bloco `finally`.
+
+
+## v9
+- Simulador e comparador de planos com recomendação, seleção e encaminhamento ao atendimento humano; 5 novos testes.
+
+## v9.1 — correção do formulário do simulador
+- Mantém o formulário de comparação de planos e suas seleções durante o polling do histórico (4 segundos).
+- Remove o formulário somente após receber uma simulação válida; conserva-o quando a chamada falha.

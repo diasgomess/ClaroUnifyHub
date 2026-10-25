@@ -4,11 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ClaroUnify Hub — MVP</title>
-<link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/style.css?v=14">
 <script src="/static/chart.umd.js?v=1"></script>
 </head>
 <body>
+<a class="skip-link" href="#area-cliente">Ir para o conteúdo</a>
 <div id="toast-container" class="toast-container"></div>
+<div class="admin-overlay" id="admin-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
+  <form class="admin-login-card" onsubmit="submitAdminLogin(event)">
+    <div class="admin-lock">🔐</div><h2 id="admin-login-title">Acesso ao Painel Claro</h2>
+    <p>Ambiente administrativo protegido. Entre com a senha configurada no Railway.</p>
+    <label for="admin-password">Senha administrativa</label>
+    <input id="admin-password" type="password" required autocomplete="current-password" placeholder="Digite sua senha" />
+    <p class="admin-error" id="admin-login-error" aria-live="polite"></p>
+    <button class="admin-submit" type="submit">Entrar no painel</button>
+    <button class="admin-cancel" type="button" onclick="closeAdminLogin()">Voltar para o cliente</button>
+  </form>
+</div>
 
 <!-- Tela de início — especificações do projeto -->
 <div id="home-screen" class="home-screen">
@@ -83,7 +95,7 @@
     </div>
     <div class="customer-switcher">
       Simulando o cliente:
-      <select id="customerSelect"></select>
+      <select id="customerSelect" aria-label="Cliente simulado"></select>
       <span class="reset-link" onclick="resetAll()">reiniciar demo</span>
     </div>
   </div>
@@ -129,7 +141,7 @@
             <div class="status" id="chat-status">online</div>
           </div>
         </div>
-        <div class="chat-body" id="chat-body"></div>
+        <div class="chat-body" id="chat-body" role="log" aria-live="polite" aria-relevant="additions"></div><div class="typing-indicator" id="typing-indicator" style="display:none">● ● ● &nbsp; Assistente processando...</div>
 
         <div class="migrate-banner" id="migrate-banner">
           <span id="migrate-text">Prefere continuar essa conversa no WhatsApp?</span>
@@ -138,7 +150,7 @@
 
         <div class="quick-replies" id="quick-replies"></div>
         <div class="chat-input-row">
-          <input id="chat-input" type="text" placeholder="Digite sua mensagem..." onkeydown="if(event.key==='Enter') sendMessage()">
+          <input id="chat-input" type="text" maxlength="500" aria-label="Digite sua mensagem" autocomplete="off" placeholder="Digite sua mensagem..." onkeydown="if(event.key==='Enter') sendMessage()">
           <button class="send-btn" onclick="sendMessage()">Enviar</button>
         </div>
       </div>
@@ -152,6 +164,7 @@
 
   <!-- ========================= ÁREA INTERNA CLARO ========================= -->
   <div class="area" id="area-interno" style="display:none;">
+    <div class="admin-toolbar"><span id="admin-identity">Área restrita · operação</span><button class="admin-logout" onclick="adminLogout()">Sair do painel</button></div>
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="dash" onclick="switchInternalTab('dash')">Dashboard Admin</button>
@@ -160,7 +173,10 @@
     </div>
 
     <div class="panel active" id="panel-dash">
-      <div class="kpi-grid" id="kpi-grid"></div>
+      <div class="analytics-toolbar"><label for="analytics-days">Período</label><select id="analytics-days" onchange="loadAnalytics()"><option value="7">7 dias</option><option value="14">14 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select><span id="analytics-status">Atualização automática · 30s</span></div>
+      <div class="kpi-grid" id="kpi-grid"></div><div class="section-title">Comparativo do período e eficiência</div><div class="kpi-grid" id="analytics-comparison" aria-live="polite"></div><p class="analytics-disclaimer" id="analytics-disclaimer"></p>
+      <div class="section-title">Evolução das mensagens</div><div class="chart-box"><canvas id="chart-evolucao" height="110"></canvas></div>
+      <div class="section-title">Intenções detectadas</div><div class="intent-tags" id="analytics-intents"></div>
       <div class="section-title">Alertas automáticos</div>
       <div id="alertas-box"></div>
       <div class="section-title">Mensagens por canal</div>
@@ -225,6 +241,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>

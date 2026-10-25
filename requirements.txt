@@ -10,3 +10,5 @@ pytest-cov
 
 # --- Suíte prova_dos_9.py (testes E2E contra o servidor real) ---
 requests
+itsdangerous>=2.2,<3
+PyJWT>=2.8,<3

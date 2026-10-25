@@ -45,3 +45,10 @@ def test_consent_is_recorded_per_customer(client, cliente_id):
 
     session_res = client.get(f"/api/session/{cliente_id}")
     assert session_res.json()["session"]["consent_given"] is True
+
+
+def test_legacy_consent_copy_still_recognized():
+    from main import CONSENT_PROMPT_TEXTS, LEGACY_CONSENT_TEXT, CONSENT_TEXT
+    assert LEGACY_CONSENT_TEXT in CONSENT_PROMPT_TEXTS
+    assert CONSENT_TEXT in CONSENT_PROMPT_TEXTS
+    assert CONSENT_TEXT != LEGACY_CONSENT_TEXT

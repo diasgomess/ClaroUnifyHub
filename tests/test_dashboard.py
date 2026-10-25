@@ -32,7 +32,7 @@ def test_handoff_queue_lists_customer_after_explicit_handoff(client, cliente_id)
     assert fila[0]["nome"] != "João Pereira"
 
 
-def test_assumir_handoff_moves_customer_out_of_queue(client, cliente_id):
+def test_assumir_handoff_keeps_active_ticket_until_closed(client, cliente_id):
     client.post("/api/consent", json={"customer_id": cliente_id, "accepted": True})
     client.post("/api/chat", json={
         "customer_id": cliente_id, "channel": "site", "text": "quero falar com atendente",
@@ -42,7 +42,13 @@ def test_assumir_handoff_moves_customer_out_of_queue(client, cliente_id):
     assert res.status_code == 200
 
     fila = client.get("/api/handoff-queue").json()
-    assert fila == []
+    assert len(fila) == 1
+    assert fila[0]["status"] == "human"
+    assert client.post(f"/api/handoff-queue/{cliente_id}/responder", json={"text": "Olá! Como posso ajudar?"}).status_code == 200
+    history = client.get(f"/api/session/{cliente_id}").json()["session"]["history"]
+    assert any(m["author"] == "atendente" for m in history)
+    assert client.post(f"/api/handoff-queue/{cliente_id}/encerrar").status_code == 200
+    assert client.get("/api/handoff-queue").json() == []
 
 
 def test_alertas_endpoint_returns_empty_list_on_healthy_demo(client):

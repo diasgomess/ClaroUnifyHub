@@ -87,3 +87,33 @@ def test_rate_limit_blocks_after_threshold(client, cliente_id, monkeypatch):
     # de alguma forma (via evento) — validado indiretamente pelo /api/events.
     events = client.get("/api/events?limit=50").json()
     assert any(e["type"] == "rate_limit_bloqueado" for e in events)
+
+
+def test_lgpd_accept_processes_previous_message_automatically(client, cliente_id):
+    first = client.post("/api/chat", json={"customer_id": cliente_id, "channel": "site", "text": "quero cancelar meu plano"})
+    assert first.json()["needs_consent"] is True
+    accepted = client.post("/api/consent", json={"customer_id": cliente_id, "accepted": True})
+    assert accepted.status_code == 200
+    assert accepted.json()["processed_previous"] is True
+    history = client.get(f"/api/session/{cliente_id}").json()["session"]["history"]
+    assert len([m for m in history if m["author"] == "cliente"]) == 1
+    assert history[-1]["author"] == "bot"
+    assert "atendente" in history[-1]["text"].lower()
+
+
+def test_lgpd_refusal_never_processes_previous_message(client, cliente_id):
+    client.post("/api/chat", json={"customer_id": cliente_id, "channel": "site", "text": "quero cancelar meu plano"})
+    refused = client.post("/api/consent", json={"customer_id": cliente_id, "accepted": False})
+    assert refused.json()["processed_previous"] is False
+    history = client.get(f"/api/session/{cliente_id}").json()["session"]["history"]
+    assert len(history) == 2
+
+
+def test_lgpd_repeated_accept_does_not_duplicate_answer(client, cliente_id):
+    client.post("/api/chat", json={"customer_id": cliente_id, "channel": "site", "text": "minha internet esta caindo"})
+    client.post("/api/consent", json={"customer_id": cliente_id, "accepted": True})
+    before = client.get(f"/api/session/{cliente_id}").json()["session"]["history"]
+    second = client.post("/api/consent", json={"customer_id": cliente_id, "accepted": True})
+    after = client.get(f"/api/session/{cliente_id}").json()["session"]["history"]
+    assert second.json()["processed_previous"] is False
+    assert len(after) == len(before)

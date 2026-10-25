@@ -21,6 +21,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test_clarounify.db"))
     monkeypatch.setenv("USE_LLM", "false")
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ADMIN_AUTH_DISABLED", "true")
 
     # Recarrega os módulos para que peguem as env vars acima (DB_PATH é lido
     # no import de db.py, no nível do módulo).

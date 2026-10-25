@@ -738,6 +738,120 @@ h1, h2, h3, .display {
   border-color: rgba(255,255,255,0.2);
 }
 
+/* ---------- Card de consentimento LGPD ---------- */
+.consent-bubble {
+  width: 100%;
+  max-width: 92%;
+  margin-top: 2px;
+}
+
+.consent-card {
+  text-align: left;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.025) 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.22);
+}
+
+.consent-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.consent-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: rgba(232, 41, 11, 0.14);
+  border: 1px solid rgba(232, 41, 11, 0.25);
+  flex: 0 0 auto;
+}
+
+.consent-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.consent-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.68);
+}
+
+.consent-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.consent-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.consent-btn:hover {
+  transform: translateY(-1px);
+}
+
+.consent-btn-primary {
+  background: linear-gradient(180deg, #ff4c2e 0%, var(--claro-red) 100%);
+  color: white;
+  box-shadow: 0 8px 20px rgba(232, 41, 11, 0.25);
+}
+
+.consent-btn-primary:hover {
+  background: linear-gradient(180deg, #ff5e42 0%, #ff3818 100%);
+}
+
+.consent-btn-secondary {
+  background: rgba(255,255,255,0.02);
+  border-color: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.82);
+}
+
+.consent-btn-secondary:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.2);
+}
+
+.consent-btn-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.consent-hint {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.48);
+}
+
+@media (max-width: 520px) {
+  .consent-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .side-note {
   max-width: 480px;
   margin-top: 12px;
@@ -1341,3 +1455,48 @@ h1, h2, h3, .display {
   background: rgba(255,255,255,0.15);
   border-radius: 3px;
 }
+
+/* v2 - Segurança, analytics, central humana e chat */
+.admin-overlay{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(8px)}
+.admin-login-card{background:#181818;border:1px solid #393939;border-radius:18px;box-shadow:0 30px 90px #000a;width:min(440px,100%);padding:36px;display:flex;flex-direction:column;gap:12px;color:white}
+.admin-login-card h2{font-size:24px;margin:0}.admin-login-card p{color:#a8a8a8;line-height:1.5;margin:0 0 10px}.admin-login-card label{font-weight:600;font-size:13px}
+.admin-login-card input,.agent-message{border-radius:9px;border:1px solid #474747;background:#0d0d0d;color:#fff;padding:13px;font:inherit;width:100%;box-sizing:border-box}
+.admin-login-card input:focus,.agent-message:focus{outline:2px solid #eb2c12}.admin-lock{font-size:32px}
+.admin-submit{background:#eb2c12;color:#fff;border:0;border-radius:9px;padding:12px;cursor:pointer;font-weight:700}.admin-cancel,.admin-logout{background:#262626;border:1px solid #474747;border-radius:8px;padding:9px 14px;color:#ddd;cursor:pointer}
+.admin-error{color:#ff796b!important;min-height:16px}.admin-toolbar,.analytics-toolbar{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:12px 0 18px;color:#aaa;font-size:13px}
+.analytics-toolbar select{background:#161616;color:#fff;border:1px solid #444;border-radius:8px;padding:8px}.intent-tags,.agent-actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:12px 0}.action-chip{border:1px solid #57251d;background:#1f1513;color:#e3beb7;border-radius:16px;padding:7px 12px;font-size:12px}
+.agent-message{resize:vertical;min-height:82px;margin:12px 0}.bubble-clock{display:block;font-size:10px;opacity:.58;margin-top:5px;text-align:right}.typing-indicator{padding:10px 20px;font-size:12px;color:#ef5036;animation:typingPulse 1s ease-in-out infinite alternate}@keyframes typingPulse{to{opacity:.35}}
+@media(max-width:600px){.admin-login-card{padding:22px}.admin-toolbar{align-items:flex-start}}
+
+/* Acessibilidade herdada do projeto v4 */
+.skip-link {position:fixed; left:12px; top:-80px; background:#fff; color:#151515; padding:12px 18px; z-index:99999; border-radius:8px; font-weight:700}
+.skip-link:focus {top:12px}
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {outline:3px solid #ff4848; outline-offset:3px}
+@media (prefers-reduced-motion: reduce) {*, *::before, *::after {animation-duration:.01ms!important; transition-duration:.01ms!important; scroll-behavior:auto!important}}
+
+/* v6.3 — ícones vetoriais consistentes na decisão LGPD */
+.consent-badge svg { width: 19px; height: 19px; color: #ff684e; }
+.consent-btn-icon { width: 16px; height: 16px; flex-shrink: 0; }
+.consent-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* Sprint 4 — leitura visual, prioridade e acessibilidade */
+.analytics-disclaimer{color:var(--muted);font-size:12px;line-height:1.5;margin:8px 0 18px}
+.handoff-brief{padding:12px 14px;background:rgba(232,41,11,.06);border:1px solid rgba(232,41,11,.25);border-radius:12px;margin:12px 0}
+.brief-heading{display:flex;gap:10px;justify-content:space-between;align-items:center;color:white;font-size:13px;font-weight:700;margin-bottom:7px}
+.handoff-brief p{font-size:12px;line-height:1.55;overflow-wrap:anywhere;margin:0;color:rgba(255,255,255,.85)}
+.priority-pill{padding:4px 10px;border-radius:20px;background:#26322b;color:#a1e7b7;font-size:11px;white-space:nowrap}
+.priority-high{background:rgba(232,41,11,.18);color:#ff927f}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #ff8e71;outline-offset:3px}
+button:disabled{cursor:not-allowed;opacity:.6}
+@media(max-width:680px){.app-shell,.area{min-width:0}.tabs{display:flex;overflow-x:auto;max-width:100%;gap:4px}.tab-btn{white-space:nowrap;min-height:44px}.chat-frame,.active-chat{max-width:100%;width:100%}.chat-input-row{min-width:0}.chat-input-row input{min-width:0}.send-btn,.quick-btn,.consent-btn{min-height:44px}.kpi-grid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}.analytics-toolbar{flex-wrap:wrap;gap:8px}.handoff-col{min-width:0}.handoff-card{max-width:100%;overflow-wrap:anywhere}.home-content{padding-left:16px;padding-right:16px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* Sprint 4 v8 — Diagnóstico visual usando dados OSS fictícios */
+.network-diagnostic{align-self:flex-start;width:94%;max-width:420px;background:#202020;border:1px solid #444;border-radius:16px;padding:15px;color:#f8f8f8;font-size:12px;box-shadow:0 8px 20px #0003}
+.network-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}.network-head strong{font-size:13px}.network-icon{font-size:19px;color:#ff512f}.network-status{margin-left:auto;padding:4px 9px;border-radius:20px;background:#54301b;color:#ffd39a;font-weight:700;font-size:10px}.network-normal .network-status{background:#173f2b;color:#9defb4}.network-indisponivel .network-status{background:#363636;color:#dedede}
+.network-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}.network-meta>div{background:#151515;border:1px solid #343434;border-radius:9px;padding:9px;min-width:0}.network-meta small{display:block;color:#aaa;margin-bottom:5px}.network-meta strong{overflow-wrap:anywhere;font-size:12px}.network-diagnostic p{margin:8px 0;line-height:1.5}.network-step{border-left:3px solid #ef371a;padding:5px 10px;color:#dedede}.network-actions{margin:13px 0}.network-human{background:#ed2d12;color:white;border:0;border-radius:10px;padding:11px 13px;font-weight:700;cursor:pointer;width:100%;min-height:44px}.network-human:hover{background:#ff482d}.network-source{font-size:10px;color:#969696;line-height:1.45;display:block}
+@media(max-width:520px){.network-diagnostic{width:100%;max-width:100%;box-sizing:border-box}.network-meta{grid-template-columns:1fr 1fr}}
+
+/* v9 — Simulador de planos */
+.plan-simulator-form,.plan-simulator-result{width:100%;max-width:94%;align-self:center;background:#1b1b1c;border:1px solid #424246;border-radius:18px;padding:18px;color:#f7f7f7;margin:8px 0;box-shadow:0 12px 28px #0005}
+.plan-simulator-form header{display:flex;gap:12px;align-items:center;margin-bottom:15px}.plan-simulator-form header span{font-size:24px;color:#ff5137}.plan-simulator-form header strong,.plan-result-title{font-size:16px;font-weight:750}.plan-simulator-form header p,.plan-disclaimer,.plan-simulator-form>small{color:#b1b1b5;font-size:11px;line-height:1.5}.plan-simulator-form label{display:block;font-size:12px;font-weight:700;margin:11px 0 6px}.plan-simulator-form select{width:100%;background:#242426;color:white;border:1px solid #59595d;border-radius:10px;padding:12px}.plan-run,.plan-select{border:0;border-radius:10px;background:#e8290b;color:#fff;font-weight:700;padding:12px;cursor:pointer;min-height:44px}.plan-run{width:100%;margin:16px 0 8px}.plan-run:disabled{opacity:.55}.plan-result-title{display:flex;justify-content:space-between;gap:8px;align-items:center}.plan-result-title span,.plan-recommended{background:#52261f;color:#ffae9a;border-radius:999px;padding:5px 8px;font-size:10px}.plan-current{color:#b1b1b5;font-size:12px}.plan-current strong{color:white}.plan-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin:12px 0}.plan-option{border:1px solid #414145;background:#242426;border-radius:12px;padding:12px}.plan-best{border-color:#f04b32;background:#2b2220}.plan-option-top{display:flex;justify-content:space-between;gap:5px;align-items:flex-start;flex-wrap:wrap}.plan-option-top strong{font-size:12px}.plan-price{font-size:24px;font-weight:800;margin-top:10px}.plan-price small{font-size:11px;color:#b7b7bb;font-weight:400}.plan-option p{font-size:11px;min-height:32px;color:#c9c9cb}.plan-select{font-size:11px;width:100%}.plan-disclaimer{margin-bottom:0}@media(max-width:620px){.plan-options{grid-template-columns:1fr}.plan-simulator-form,.plan-simulator-result{max-width:100%}}

@@ -67,7 +67,7 @@ function showToast(message, level = 'error') {
   const icon = level === 'warning' ? '⚠️' : '⛔';
   toast.innerHTML = `
     <span class="toast-icon">${icon}</span>
-    <span class="toast-body">${message}</span>
+    <span class="toast-body">${escapeHtml(message)}</span>
     <span class="toast-close" onclick="this.parentElement.remove()">✕</span>`;
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 6000);
@@ -85,6 +85,10 @@ async function apiFetch(url, options) {
     throw err;
   }
   if (!res.ok) {
+    if (res.status === 401 && url !== '/api/admin/login' && !url.includes('/api/demo/')) {
+      adminAuthenticated = false;
+      document.getElementById('admin-overlay').style.display = 'flex';
+    }
     let msg = `Erro ao processar sua solicitação (HTTP ${res.status}).`;
     try {
       const body = await res.clone().json();
@@ -99,7 +103,7 @@ async function apiFetch(url, options) {
 // ---------- Carregar clientes do banco (nada mais hardcoded no HTML) ----------
 async function loadCustomerSelect() {
   try {
-    const res = await apiFetch('/api/admin/clientes?limit=100');
+    const res = await apiFetch('/api/demo/clientes');
     const data = await res.json();
     const select = document.getElementById('customerSelect');
     select.innerHTML = data.items.map(c => `<option value="${c.id}">${c.nome} — ${c.id}</option>`).join('');
@@ -107,8 +111,33 @@ async function loadCustomerSelect() {
 }
 loadCustomerSelect();
 
+let adminAuthenticated = false;
+function closeAdminLogin() { document.getElementById('admin-overlay').style.display = 'none'; }
+async function submitAdminLogin(event) {
+  event.preventDefault();
+  const err = document.getElementById('admin-login-error');
+  err.textContent = '';
+  try {
+    const res = await fetch('/api/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:document.getElementById('admin-password').value})});
+    if (!res.ok) { err.textContent = res.status === 503 ? 'Configure ADMIN_PASSWORD e ADMIN_SESSION_SECRET no Railway.' : 'Senha inválida.'; return; }
+    adminAuthenticated = true;
+    document.getElementById('admin-password').value = '';
+    closeAdminLogin();
+    switchMode('interno');
+  } catch (_) { err.textContent = 'Não foi possível conectar ao servidor.'; }
+}
+async function adminLogout() {
+  await fetch('/api/admin/logout', {method:'POST'}).catch(()=>{});
+  adminAuthenticated = false;
+  switchMode('cliente');
+}
+
 // ---------- Alternar entre área do cliente e área interna da Claro ----------
-function switchMode(mode) {
+async function switchMode(mode) {
+  if (mode === 'interno' && !adminAuthenticated) {
+    try { const r = await fetch('/api/admin/me'); adminAuthenticated = r.ok; } catch (_) {}
+    if (!adminAuthenticated) { document.getElementById('admin-overlay').style.display = 'flex'; return; }
+  }
   appMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('area-cliente').style.display = mode === 'cliente' ? '' : 'none';
@@ -116,7 +145,7 @@ function switchMode(mode) {
   if (mode === 'cliente') {
     if (activeChannel) loadHistory();
   } else {
-    if (internalTab === 'dash') loadDashboard();
+    if (internalTab === 'dash') { loadDashboard(); loadAnalytics(); }
     if (internalTab === 'handoff') loadHandoff();
     if (internalTab === 'contato') loadContatoLista();
   }
@@ -127,13 +156,13 @@ function switchInternalTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + tab).classList.add('active');
-  if (tab === 'dash') loadDashboard();
+  if (tab === 'dash') { loadDashboard(); loadAnalytics(); }
   if (tab === 'handoff') loadHandoff();
   if (tab === 'contato') loadContatoLista();
 }
 
 document.getElementById('customerSelect').addEventListener('change', () => {
-  if (appMode === 'cliente' && activeChannel) loadHistory();
+  if (appMode === 'cliente' && activeChannel && !document.querySelector('#plan-run:disabled')) loadHistory();
   if (appMode === 'interno' && internalTab === 'dash') loadDashboard();
   if (appMode === 'interno' && internalTab === 'handoff') loadHandoff();
 });
@@ -189,7 +218,7 @@ function applyChannelChrome(channel) {
   if (channel === 'site') {
     quickReplies.innerHTML = `
       <button class="quick-btn" onclick="sendQuick('Minha internet está caindo toda hora')">Internet caindo</button>
-      <button class="quick-btn" onclick="sendQuick('Quero conhecer planos com mais dados')">Ver planos</button>
+      <button class="quick-btn" onclick="openPlanSimulator()">Comparar planos</button>
       <button class="quick-btn" onclick="sendQuick('Quero a segunda via da minha fatura')">2ª via fatura</button>
       <button class="quick-btn" onclick="sendQuick('Quero cancelar meu plano')">Cancelar plano</button>`;
     migrateText.textContent = 'Prefere continuar essa conversa no WhatsApp?';
@@ -216,15 +245,17 @@ function migrateChannel() {
 }
 
 // ---------- Chat ----------
-function bubbleHtml(author, text, originChannel, viewingChannel) {
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function bubbleHtml(author, text, originChannel, viewingChannel, ts) {
   const cls = author === 'cliente' ? 'cliente' : 'bot';
-  const safe = text.replace(/</g, '&lt;');
+  const safe = escapeHtml(text);
+  const clock = ts ? new Date(ts * 1000).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
   let tag = '';
   if (originChannel && originChannel !== viewingChannel) {
     const label = originChannel === 'site' ? 'via Site Web' : 'via WhatsApp';
     tag = `<div class="origin-tag">↳ recebido ${label}</div>`;
   }
-  return `<div class="bubble ${cls}">${tag}${safe}</div>`;
+  return `<div class="bubble ${cls}">${author === "atendente" ? "<div class=\"origin-tag\">Atendimento humano</div>" : tag}${safe}<small class="bubble-clock">${clock}</small></div>`;
 }
 
 async function loadHistory(justMigrated, fromChannel, toChannel) {
@@ -243,8 +274,93 @@ async function loadHistory(justMigrated, fromChannel, toChannel) {
     const last = data.session.history[data.session.history.length - 1];
     const npsPendente = data.session.nps === null && last && last.author === 'bot' && last.text === NPS_PROMPT_TEXT;
     if (npsPendente) showNpsPrompt();
-  } catch (_) {
+  } catch (error) {
+    console.error('Falha no envio ou atualização da conversa:', error);
     renderChatError();
+  }
+}
+
+function planSimulatorCard(data) {
+  const safe = value => escapeHtml(String(value ?? ''));
+  const cards = (data.plans || []).map(p => `<article class="plan-option ${p.nome === data.recommended ? 'plan-best' : ''}">
+    <div class="plan-option-top"><strong>${safe(p.nome)}</strong>${p.nome === data.recommended ? '<span class="plan-recommended">Recomendado</span>' : ''}</div>
+    <div class="plan-price">R$ ${Number(p.preco).toFixed(2).replace('.', ',')}<small>/mês</small></div>
+    <p>${safe(p.descricao)}</p><button type="button" class="plan-select" data-plan="${safe(p.nome)}">Solicitar este plano</button>
+  </article>`).join('');
+  return `<section class="plan-simulator-result" aria-label="Comparação de planos demonstrativos">
+    <div class="plan-result-title">Comparação de planos <span>Catálogo simulado</span></div>
+    <p class="plan-current">Seu plano atual: <strong>${safe(data.current_plan || 'Não informado')}</strong></p>
+    <div class="plan-options">${cards || '<p>Nenhuma oferta cadastrada.</p>'}</div>
+    <p class="plan-disclaimer">${safe(data.notice)}</p></section>`;
+}
+
+function openPlanSimulator(draft = null) {
+  const body = document.getElementById('chat-body');
+  if (!body || !activeChannel) return;
+  document.getElementById('plan-simulator-form')?.remove();
+  const wrapper = document.createElement('div');
+  wrapper.id = 'plan-simulator-form';
+  wrapper.className = 'plan-simulator-form';
+  wrapper.innerHTML = `<header><span>◈</span><div><strong>Encontre seu plano ideal</strong><p>Escolha o perfil de uso e a prioridade de orçamento.</p></div></header>
+    <label for="plan-usage">Perfil de consumo</label><select id="plan-usage"><option value="leve">Mensagens e redes sociais</option><option value="moderado" selected>Vídeos, música e aplicativos</option><option value="intenso">Streaming e uso intenso</option><option value="residencial">Internet residencial (Fibra)</option></select>
+    <label for="plan-budget">Prioridade de orçamento</label><select id="plan-budget"><option value="economico">Menor preço</option><option value="intermediario" selected>Equilíbrio entre preço e benefícios</option><option value="premium">Mais benefícios</option></select>
+    <button type="button" class="plan-run" id="plan-run">Comparar planos →</button><small>Simulação baseada no catálogo fictício do MVP.</small>`;
+  body.appendChild(wrapper);
+  if (draft) {
+    if (draft.usage) wrapper.querySelector('#plan-usage').value = draft.usage;
+    if (draft.budget) wrapper.querySelector('#plan-budget').value = draft.budget;
+    wrapper.querySelector('#plan-run').disabled = draft.busy;
+  }
+  wrapper.querySelector('#plan-run').addEventListener('click', runPlanSimulator);
+  body.scrollTop = body.scrollHeight;
+}
+
+async function runPlanSimulator() {
+  const button = document.getElementById('plan-run');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const response = await apiFetch('/api/plans/simulate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:currentCustomer(),channel:activeChannel,usage:document.getElementById('plan-usage').value,budget:document.getElementById('plan-budget').value})});
+    if (!response.ok) throw new Error('Falha na simulação HTTP '+response.status);
+    document.getElementById('plan-simulator-form')?.remove();
+    await loadHistory();
+  } catch(error) { console.error('Simulador:', error); alert(error.message); button.disabled=false; }
+}
+
+async function selectSimulatedPlan(name) {
+  try {
+    const response = await apiFetch('/api/plans/select', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:currentCustomer(),channel:activeChannel,plan_name:name})});
+    if (!response.ok) throw new Error('Não foi possível solicitar o plano (HTTP '+response.status+')');
+    await loadHistory();
+  } catch(error) { console.error('Solicitação do plano:',error); alert(error.message); }
+}
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('.plan-select[data-plan]');
+  if (button) selectSimulatedPlan(button.dataset.plan);
+});
+
+function networkDiagnosticCard(data) {
+  const cls = ['normal','instabilidade','indisponivel'].includes(data.status) ? data.status : 'indisponivel';
+  const safe = value => escapeHtml(value || 'Não informado');
+  return `<section class="network-diagnostic network-${cls}" aria-label="Diagnóstico de rede simulado">
+    <div class="network-head"><span class="network-icon" aria-hidden="true">◉</span><strong>Diagnóstico de conexão</strong><span class="network-status">${safe(data.label)}</span></div>
+    <div class="network-meta"><div><small>Região</small><strong>${safe(data.region)}</strong></div><div><small>Previsão estimada</small><strong>${safe(data.eta || 'Não disponível')}</strong></div></div>
+    <p>${safe(data.description)}</p><p class="network-step">${safe(data.next_step)}</p>
+    <div class="network-actions"><button type="button" class="network-human" onclick="sendQuick('Quero falar com um atendente humano')">Solicitar atendente</button></div>
+    <small class="network-source">${safe(data.source)} · Demonstração, sem consulta à rede real da Claro</small>
+  </section>`;
+}
+
+async function runNetworkDiagnostic() {
+  if (!activeChannel) return;
+  try {
+    const response = await apiFetch('/api/network/diagnostic', {method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({customer_id: currentCustomer(), channel: activeChannel})});
+    if (!response.ok) throw new Error(`Diagnóstico HTTP ${response.status}`);
+    await loadHistory();
+  } catch (error) {
+    console.error('Falha no diagnóstico:', error);
   }
 }
 
@@ -257,6 +373,16 @@ function renderChatError() {
 
 function renderHistory(history, status, justMigrated, fromChannel, toChannel) {
   const body = document.getElementById('chat-body');
+  // O histórico é atualizado a cada 4s. Preserve o formulário ainda não
+  // enviado, incluindo seleções, ao reconstruir as mensagens.
+  const simulator = body.querySelector('#plan-simulator-form');
+  const simulatorDraft = simulator ? {
+    customerId: currentCustomer(),
+    channel: activeChannel,
+    usage: simulator.querySelector('#plan-usage')?.value,
+    budget: simulator.querySelector('#plan-budget')?.value,
+    busy: simulator.querySelector('#plan-run')?.disabled === true,
+  } : null;
   body.innerHTML = '';
 
   if (history.length === 0) {
@@ -264,7 +390,15 @@ function renderHistory(history, status, justMigrated, fromChannel, toChannel) {
   }
 
   history.forEach(m => {
-    body.innerHTML += bubbleHtml(m.author, m.text, m.channel, activeChannel);
+    if (m.author === 'bot' && m.text.startsWith('[[SIMULADOR_PLANOS_V1]]')) {
+      try { body.innerHTML += planSimulatorCard(JSON.parse(m.text.slice('[[SIMULADOR_PLANOS_V1]]'.length))); }
+      catch(error) { console.error('Comparação inválida:', error); }
+    } else if (m.author === 'bot' && m.text.startsWith('[[DIAGNOSTICO_REDE_V1]]')) {
+      try { body.innerHTML += networkDiagnosticCard(JSON.parse(m.text.slice('[[DIAGNOSTICO_REDE_V1]]'.length))); }
+      catch (error) { console.error('Diagnóstico inválido no histórico:', error); }
+    } else {
+      body.innerHTML += bubbleHtml(m.author, m.text, m.channel, activeChannel, m.ts);
+    }
   });
 
   if (justMigrated) {
@@ -272,12 +406,20 @@ function renderHistory(history, status, justMigrated, fromChannel, toChannel) {
     body.innerHTML += `<div class="bubble system migrate-note">🔀 Você migrou para o ${label} — o Context Manager já trouxe todo o histórico, sem repetir nada.</div>`;
   }
 
-  if (status === 'handoff') {
+  if (status === 'handoff' || status === 'human') {
     body.innerHTML += '<div class="bubble system">🔴 Conversa encaminhada para atendimento humano — veja o Painel de Handoff (área interna Claro).</div>';
+    if (status === 'handoff') {
+      body.innerHTML += '<div class="bubble system"><button type="button" class="send-btn" onclick="registerNotifyPreference(&quot;whatsapp&quot;)">Registrar preferência: WhatsApp</button></div>';
+    }
   }
 
+  // Não recrie o formulário depois da simulação; nesse caso o resultado
+  // persistido já está presente no histórico.
+  if (simulatorDraft && simulatorDraft.customerId === currentCustomer() && simulatorDraft.channel === activeChannel) {
+    openPlanSimulator(simulatorDraft);
+  }
   body.scrollTop = body.scrollHeight;
-  document.getElementById('chat-status').textContent = status === 'handoff' ? 'aguardando atendente' : 'online';
+  document.getElementById('chat-status').textContent = status === 'handoff' ? 'aguardando atendente' : status === 'human' ? 'com atendente humano' : 'online';
 }
 
 async function sendMessage() {
@@ -294,6 +436,10 @@ async function sendQuick(text) {
 
 async function postMessage(text) {
   const cid = currentCustomer();
+  const typing = document.getElementById('typing-indicator');
+  const input = document.getElementById('chat-input');
+  typing.style.display = '';
+  input.disabled = true;
   try {
     const res = await apiFetch('/api/chat', {
       method: 'POST',
@@ -303,20 +449,44 @@ async function postMessage(text) {
     const data = await res.json();
     await loadHistory();
     if (data.needs_consent) showConsentPrompt();
+    if (data.intent === 'suporte' && !data.needs_consent && !data.handoff) await runNetworkDiagnostic();
     if (data.ask_nps) showNpsPrompt();
-  } catch (_) {
+  } catch (error) {
+    console.error('Falha no envio ou atualização da conversa:', error);
     renderChatError();
+  } finally {
+    typing.style.display = 'none';
+    input.disabled = false;
+    input.focus();
   }
 }
 
 function showConsentPrompt() {
   const body = document.getElementById('chat-body');
+  if (!body || document.getElementById('consent-box')) return;
   const box = document.createElement('div');
-  box.className = 'bubble system';
+  box.className = 'bubble system consent-bubble';
+  box.id = 'consent-box';
   box.innerHTML = `
-    <div style="margin-top:6px;">
-      <button class="quick-btn" onclick="respondConsent(true)">Aceito</button>
-      <button class="quick-btn quick-btn-muted" onclick="respondConsent(false)">Não aceito</button>
+    <div class="consent-card" role="group" aria-label="Escolha de consentimento LGPD">
+      <div class="consent-card-header">
+        <span class="consent-badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/></svg></span>
+        <div>
+          <div class="consent-title">Consentimento de dados</div>
+          <p class="consent-subtitle">Você decide se podemos consultar os dados necessários para atender sua solicitação.</p>
+        </div>
+      </div>
+      <div class="consent-actions">
+        <button class="consent-btn consent-btn-primary" type="button" onclick="respondConsent(true)">
+          <svg class="consent-btn-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17l9-10"/></svg>
+          <span>Aceito</span>
+        </button>
+        <button class="consent-btn consent-btn-secondary" type="button" onclick="respondConsent(false)">
+          <svg class="consent-btn-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
+          <span>Não aceito</span>
+        </button>
+      </div>
+      <p class="consent-hint">Se não autorizar, não consultaremos sua conta e não poderemos concluir este atendimento.</p>
     </div>`;
   body.appendChild(box);
   body.scrollTop = body.scrollHeight;
@@ -325,13 +495,18 @@ function showConsentPrompt() {
 async function respondConsent(accepted) {
   const cid = currentCustomer();
   try {
-    await apiFetch('/api/consent', {
+    const res = await apiFetch('/api/consent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ customer_id: cid, accepted }),
     });
-  } catch (_) { /* toast já exibido */ }
-  await loadHistory();
+    const data = await res.json();
+    await loadHistory();
+    if (accepted && data.intent === 'suporte' && !data.handoff) await runNetworkDiagnostic();
+    if (data.ask_nps) showNpsPrompt();
+  } catch (error) {
+    console.error('Falha ao registrar consentimento:', error);
+  }
 }
 
 // ---------- RF006: pesquisa de satisfação (NPS) ----------
@@ -526,22 +701,23 @@ async function loadHandoff() {
 
 function handoffCard(item) {
   const transcript = item.history.slice(-8).map(m =>
-    `<div class="line"><b>${m.author === 'cliente' ? 'Cliente' : 'Bot'}:</b> ${m.text}</div>`
+    `<div class="line"><b>${escapeHtml(m.author === 'cliente' ? 'Cliente' : m.author === 'atendente' ? 'Atendente' : 'Bot')}:</b> ${escapeHtml(m.text)}</div>`
   ).join('');
   const acoes = suggestedActions(item.last_intent);
 
   return `
   <div class="handoff-card">
     <div class="handoff-col">
-      <h3>${item.nome}</h3>
-      <div class="meta">${item.plano} · cliente desde ${item.cliente_desde} · NPS histórico ${item.nps_historico}</div>
-      <div class="meta">Intenção detectada: <b>${item.last_intent}</b></div>
+      <h3>${escapeHtml(item.nome)}</h3>
+      <div class="meta">${escapeHtml(item.plano)} · cliente desde ${escapeHtml(item.cliente_desde)} · NPS histórico ${escapeHtml(item.nps_historico)}</div>
+      <div class="meta">Intenção detectada: <b>${escapeHtml(item.last_intent)}</b></div>
+      <div class="handoff-brief" aria-label="Resumo do atendimento"><div class="brief-heading">Resumo para o atendente <span class="priority-pill ${item.brief?.priority === 'Alta' ? 'priority-high' : ''}">${escapeHtml(item.brief?.priority || 'Normal')}</span></div><div class="meta">${escapeHtml(item.brief?.reason || 'Solicitação de atendimento')}</div><p>${escapeHtml(item.brief?.summary || 'Sem resumo disponível')}</p></div>
       <div class="transcript">${transcript}</div>
     </div>
     <div class="handoff-col">
       <h3>Ações sugeridas</h3>
-      <div class="suggested-actions">${acoes.map(a => `<button>${a}</button>`).join('')}</div>
-      <button class="assume-btn" onclick="assumirHandoff('${item.customer_id}')">Assumir atendimento</button>
+      <div class="suggested-actions">${acoes.map(a => `<span class="action-chip">${escapeHtml(a)}</span>`).join('')}</div>
+      ${item.status === 'handoff' ? `<button class="assume-btn" onclick="assumirHandoff('${item.customer_id}')">Assumir atendimento</button>` : `<div class="meta">Atendente: ${escapeHtml(item.assigned_agent || 'Operador')}</div><textarea class="agent-message" id="agent-msg-${item.customer_id}" placeholder="Escreva uma resposta para o cliente..." maxlength="4000"></textarea><div class="agent-actions"><button class="assume-btn" onclick="responderHandoff('${item.customer_id}')">Enviar resposta</button><button class="admin-logout" onclick="encerrarHandoff('${item.customer_id}')">Encerrar</button></div>`}
       <div class="note-box">O contexto completo foi transferido automaticamente. O cliente não precisará repetir informações.</div>
     </div>
   </div>`;
@@ -559,6 +735,49 @@ async function assumirHandoff(customerId) {
     await loadHandoff();
   } catch (_) { /* toast já exibido */ }
 }
+
+async function responderHandoff(customerId) {
+  const input = document.getElementById('agent-msg-' + customerId);
+  const text = input.value.trim(); if (!text) return;
+  try { await apiFetch(`/api/handoff-queue/${customerId}/responder`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}); await loadHandoff(); }
+  catch (_) {}
+}
+async function encerrarHandoff(customerId) {
+  if (!confirm('Encerrar este atendimento?')) return;
+  try { await apiFetch(`/api/handoff-queue/${customerId}/encerrar`, {method:'POST'}); await loadHandoff(); }
+  catch (_) {}
+}
+let analyticsChart = null;
+async function loadAnalytics() {
+  if (!adminAuthenticated) return;
+  try {
+    const days = Number(document.getElementById('analytics-days').value);
+    const data = await (await apiFetch('/api/admin/analytics?days='+days)).json();
+    const c = document.getElementById('chart-evolucao');
+    if (typeof Chart !== 'undefined') {
+      if (analyticsChart) analyticsChart.destroy();
+      analyticsChart = new Chart(c, {type:'line', data:{labels:data.series.map(x=>x.date.slice(5)),datasets:[{label:'Mensagens dos clientes',data:data.series.map(x=>x.messages),borderColor:'#ee2e12',backgroundColor:'rgba(238,46,18,.13)',fill:true,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:'#ddd'}}},scales:{x:{ticks:{color:'#aaa'}},y:{beginAtZero:true,ticks:{precision:0,color:'#aaa'}}}}});
+    }
+    const comparison = data.comparison || {};
+    const ops = data.operations || {};
+    const delta = comparison.change_pct === null || comparison.change_pct === undefined ? 'Sem base anterior' : (comparison.change_pct > 0 ? '+' : '') + comparison.change_pct + '%';
+    document.getElementById('analytics-comparison').innerHTML = `
+      ${kpiCard('Mensagens no período', comparison.current_messages ?? 0)}
+      ${kpiCard('Período anterior', comparison.previous_messages ?? 0)}
+      ${kpiCard('Variação das mensagens', delta)}
+      ${kpiCard('Sessões iniciadas', ops.sessions_created ?? 0)}
+      ${kpiCard('Resolução no período', ops.resolution_rate_pct == null ? '—' : ops.resolution_rate_pct + '%')}
+      ${kpiCard('Duração média de sessão', ops.average_session_duration_minutes == null ? '—' : ops.average_session_duration_minutes + ' min')}`;
+    document.getElementById('analytics-disclaimer').textContent = data.disclaimer || '';
+    document.getElementById('analytics-intents').innerHTML = data.intents.map(x=>`<span class="action-chip">${escapeHtml(x.last_intent)} · ${x.total}</span>`).join('') || 'Ainda não existem intenções registradas.';
+    document.getElementById('analytics-status').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR') + ' · automático 30s';
+  } catch (_) {}
+}
+setInterval(() => {
+  if (!adminAuthenticated || appMode !== 'interno') return;
+  if (internalTab === 'dash') { loadDashboard(); loadAnalytics(); }
+  if (internalTab === 'handoff') loadHandoff();
+}, 30000);
 
 // ---------- Iniciar Contato (Painel Claro escolhe o cliente) ----------
 let contatoFiltro = { q: '', fatura_status: '', status_rede: '' };
@@ -725,7 +944,7 @@ async function resetAll() {
   showChannelPicker();
   activeChannel = null;
   if (appMode === 'interno') {
-    if (internalTab === 'dash') loadDashboard();
+    if (internalTab === 'dash') { loadDashboard(); loadAnalytics(); }
     if (internalTab === 'handoff') loadHandoff();
     if (internalTab === 'contato') loadContatoLista();
   }
@@ -733,7 +952,17 @@ async function resetAll() {
 
 // ---------- Polling leve ----------
 setInterval(() => {
-  if (appMode === 'cliente' && activeChannel) loadHistory();
+  if (appMode === 'cliente' && activeChannel && !document.querySelector('#plan-run:disabled')) loadHistory();
   if (appMode === 'interno' && internalTab === 'dash') loadDashboard();
   if (appMode === 'interno' && internalTab === 'handoff') loadHandoff();
 }, 4000);
+
+// Preferência de notificação da fila (registrada, sem envio externo nesta demo).
+async function registerNotifyPreference(channel) {
+  try {
+    await apiFetch('/api/handoff/notify', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({customer_id:currentCustomer(),channel})});
+    await loadHistory();
+    showToast('Preferência registrada no atendimento (simulação, sem envio externo).', 'warning');
+  } catch (_) {}
+}
